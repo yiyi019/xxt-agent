@@ -1,0 +1,17 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# User credentials and session state (KEEP PRIVATE)
+config.json
+data/*.pkl
+data/cookies.pkl
+*.pid
+*.log
+
+# Temp files
+.temp.*

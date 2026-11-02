@@ -1,0 +1,23 @@
+{
+  "phone_number": "",
+  "password": "",
+  "api_key": "",
+  "api_model": "deepseek-v4.1-flash",
+  "api_base_url": "https://api.deepseek.com",
+  "browser": "edge",
+  "headless": true,
+  "driver_path": null,
+  "default_courses": [
+    "音乐鉴赏",
+    "艺术鉴赏"
+  ],
+  "speed": 2.0,
+  "pass_face": true,
+  "pass_video": false,
+  "video_solve_mode": "ai",
+  "quiz_solve_mode": "ai",
+  "submit_threshold": 1.0,
+  "discussion_mode": "skip",
+  "multi_device_bypass": true,
+  "timeout": 60
+}
