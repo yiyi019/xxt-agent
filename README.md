@@ -51,7 +51,7 @@ python -m xxt_agent.cli status --json
 {
   "ok": true,
   "browser": "edge",
-  "driver_path": "D:\\Xuexitong_shuake\\Xuexitong_shuake-master\\edgedriver_win64\\msedgedriver.exe",
+  "driver_path": null,
   "driver_exists": true,
   "cookies_exist": true,
   "api_key_configured": true,
@@ -109,9 +109,6 @@ python -m xxt_agent.cli solve --question "以下哪部作品是达芬奇的代�
 任何 Python 智能体或脚本都可以直接导入并作为类调用：
 
 ```python
-import sys
-sys.path.append(r"D:\Xuexitong_shuake")
-
 from xxt_agent import XuexitongAgent
 
 # 使用上下文管理器自动管理浏览器资源
@@ -141,7 +138,7 @@ with XuexitongAgent() as agent:
 
 ## 🛠️ 大模型 Function Calling 工具定义
 
-在 `D:\Xuexitong_shuake\xxt_agent\agent_tools.json` 中已内置 OpenAI / Anthropic / Gemini 兼容的 Tool Schema，包括：
+在项目目录中的 `agent_tools.json` 已内置 OpenAI / Anthropic / Gemini 兼容的 Tool Schema，包括：
 - `xxt_get_status`
 - `xxt_list_courses`
 - `xxt_get_chapters`

@@ -62,9 +62,8 @@ class AgentConfig:
         # Driver path fallback resolution
         if not cfg.driver_path or not os.path.exists(cfg.driver_path):
             candidates = [
-                os.path.join(BASE_DIR, "..", "Xuexitong_shuake-master", "edgedriver_win64", "msedgedriver.exe"),
-                os.path.join(BASE_DIR, "..", "Xuexitong_App", "edgedriver_win64", "msedgedriver.exe"),
-                r"D:\Xuexitong_shuake\Xuexitong_shuake-master\edgedriver_win64\msedgedriver.exe"
+                os.path.join(BASE_DIR, "..", "edgedriver_win64", "msedgedriver.exe"),
+                os.path.join(BASE_DIR, "..", "chromedriver_win64", "chromedriver.exe"),
             ]
             for cand in candidates:
                 cand_abs = os.path.abspath(cand)

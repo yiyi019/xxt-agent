@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
-LEGACY_CONFIG_PATH = Path(r"D:\Xuexitong_shuake\Xuexitong_shuake-master\task\tool\account_info.json")
+LEGACY_CONFIG_PATH = Path(__file__).resolve().parent.parent / "task" / "tool" / "account_info.json"
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent / "config.json"
 DATA_DIR = Path(__file__).resolve().parent / "data"
 

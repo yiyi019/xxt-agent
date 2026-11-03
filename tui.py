@@ -21,7 +21,7 @@ from rich.live import Live
 from xxt_agent.models import RunEvent
 from xxt_agent.config import XXTConfig
 
-STATUS_FILE = r"D:\Xuexitong_shuake\live_status.json"
+STATUS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "live_status.json")
 
 class AgentTUI:
     def __init__(self, course_name: str, config: XXTConfig):

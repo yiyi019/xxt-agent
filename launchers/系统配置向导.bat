@@ -1,8 +1,18 @@
 @echo off
 chcp 65001 >nul
 title 学习通自动化 - 开箱即用交互配置向导
-cd /d D:\Xuexitong_shuake
-set PYTHONPATH=D:\Xuexitong_shuake
+
+:: 动态定位项目路径 (支持直接运行或作为快捷方式运行)
+set "CURRENT_DIR=%~dp0"
+if exist "%CURRENT_DIR%xxt_agent" (
+    cd /d "%CURRENT_DIR%"
+) else if exist "%CURRENT_DIR%..\xxt_agent" (
+    cd /d "%CURRENT_DIR%.."
+) else (
+    cd /d "%CURRENT_DIR%"
+)
+
+set "PYTHONPATH=%cd%"
 set PYTHONIOENCODING=utf-8
-C:\Users\yiyi\miniconda3\python.exe -m xxt_agent.cli wizard
+python -m xxt_agent.cli wizard
 pause

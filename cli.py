@@ -28,7 +28,7 @@ from xxt_agent.config import XXTConfig
 from xxt_agent.ai_solver import DeepSeekSolver
 from xxt_agent.wizard import run_interactive_wizard, check_and_prompt_if_unconfigured
 
-STATUS_FILE = r"D:\Xuexitong_shuake\live_status.json"
+STATUS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "live_status.json")
 
 def _sanitize_data(data: Any) -> Any:
     if isinstance(data, str):

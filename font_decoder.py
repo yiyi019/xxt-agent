@@ -32,7 +32,7 @@ class FontDecoder:
         """Loads the pre-computed contour MD5 -> unicode char code mapping."""
         # Fallback to legacy path if not in current data dir
         if not self.font_dict_path.exists():
-            legacy = Path(r"D:\Xuexitong_shuake\Xuexitong_shuake-master\task\tool\font_dict.txt")
+            legacy = Path(__file__).resolve().parent.parent / "task" / "tool" / "font_dict.txt"
             if legacy.exists():
                 self.font_dict_path = legacy
 

@@ -28,7 +28,7 @@ class SessionManager:
         target_path = self.cookies_path
         # Fallback to legacy path if not in current data dir
         if not target_path.exists():
-            legacy = Path(r"D:\Xuexitong_shuake\Xuexitong_shuake-master\task\tool\cookies.pkl")
+            legacy = Path(__file__).resolve().parent.parent / "task" / "tool" / "cookies.pkl"
             if legacy.exists():
                 target_path = legacy
 
