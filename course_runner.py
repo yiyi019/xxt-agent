@@ -311,17 +311,18 @@ class CourseRunner:
                     res["limit_reached"] = True
                     res["reason"] = f"今日已观看视频时长达上限 ({cur_d}/{max_d}分钟)"
 
-            # 2. Match: 今日可完成视频任务点: 2/5
+            # 2. Match: 今日可完成视频任务点: 2/5 (递减计数，剩余额度；0/5 才代表今日额度耗尽)
             task_match = re.search(r"今日可完成视频任务点[^\d]*(\d+)\s*/\s*(\d+)", text)
             if task_match:
                 cur_t, max_t = int(task_match.group(1)), int(task_match.group(2))
                 res["has_limit"] = True
                 res["tasks_cur"] = cur_t
                 res["tasks_max"] = max_t
-                if max_t > 0 and cur_t >= max_t:
+                # 只有剩余任务点为 0 且上限 > 0 时才判定为额度耗尽
+                if max_t > 0 and cur_t <= 0:
                     res["limit_reached"] = True
                     if not res["reason"]:
-                        res["reason"] = f"今日视频任务点已达上限 ({cur_t}/{max_t})"
+                        res["reason"] = f"今日可完成视频任务点已耗尽 (0/{max_t})"
 
         except Exception as e:
             logger.debug(f"Error checking daily limits: {e}")
