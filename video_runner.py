@@ -165,10 +165,14 @@ class VideoRunner:
                 })
                 break
 
-            # Handle unexpected pause
+            # Auto-resume if video paused or stalled
+            if times.get("paused"):
+                logger.debug("Video is paused; triggering play immediately...")
+                self._trigger_play()
+
             if cur_time_str == last_time_str and cur_time_str != "":
                 stagnant_seconds += 1
-                if stagnant_seconds >= 3:
+                if stagnant_seconds >= 2:
                     logger.debug("Playback stalled; clicking play to resume...")
                     self._trigger_play()
                     stagnant_seconds = 0
@@ -185,39 +189,56 @@ class VideoRunner:
             })
 
     def _trigger_play(self) -> None:
-        try:
-            # Try big play button
-            btns = self.driver.find_elements(By.CLASS_NAME, "vjs-big-play-button")
-            if btns and btns[0].is_displayed():
-                btns[0].click()
-                return
-        except Exception:
-            pass
-
-        try:
-            # Try play control button
-            pause_btns = self.driver.find_elements(
-                By.CSS_SELECTOR, '[class*="vjs-play-control"][class*="vjs-paused"]'
-            )
-            if pause_btns:
-                pause_btns[0].click()
-                return
-        except Exception:
-            pass
-
-        # Native JS fallback
+        """Resumes video playback using Video.js API, DOM click, and HTML5 video element play."""
         try:
             self.driver.execute_script(
-                "var v = document.querySelector('video'); if (v && v.paused) v.play();"
+                """
+                // 1. Video.js player API
+                if (window.videojs) {
+                    var players = Object.values(window.videojs.players || {});
+                    players.forEach(function(p) {
+                        try { if (p && p.play) p.play(); } catch(e){}
+                    });
+                }
+                // 2. Click play control or big play button
+                var btn = document.querySelector('.vjs-play-control, .vjs-big-play-button, button[title*="播放"]');
+                if (btn) {
+                    try { btn.click(); } catch(e){}
+                }
+                // 3. Raw HTML5 video element play
+                var v = document.querySelector('video');
+                if (v && v.paused) {
+                    v.muted = true;
+                    try { v.play(); } catch(e){}
+                }
+                """
             )
+        except Exception as e:
+            logger.debug(f"Script trigger play failed: {e}")
+
+        try:
+            btns = self.driver.find_elements(By.CSS_SELECTOR, ".vjs-play-control, .vjs-big-play-button")
+            for b in btns:
+                if b.is_displayed():
+                    b.click()
+                    break
         except Exception:
             pass
 
     def _configure_playback(self) -> None:
-        """Sets mute and requested playback rate."""
+        """Sets mute and requested playback rate, and injects anti-blur focus protection."""
         try:
             self.driver.execute_script(
                 """
+                window.onblur = null;
+                window.onfocus = null;
+                window.onmouseleave = null;
+                document.onvisibilitychange = null;
+                try {
+                    Object.defineProperty(document, 'hidden', { get: function() { return false; }, configurable: true });
+                    Object.defineProperty(document, 'visibilityState', { get: function() { return 'visible'; }, configurable: true });
+                } catch(e){}
+
                 var v = document.querySelector('video');
                 if (v) {
                     v.muted = true;
@@ -251,7 +272,7 @@ class VideoRunner:
             return self.driver.execute_script(
                 """
                 var v = document.querySelector('video');
-                if (!v) return { current_seconds: 0, duration_seconds: 0, current_text: '', duration_text: '' };
+                if (!v) return { current_seconds: 0, duration_seconds: 0, current_text: '', duration_text: '', paused: true };
                 function fmt(s) {
                     var m = Math.floor(s / 60);
                     var sec = Math.floor(s % 60);
@@ -261,7 +282,8 @@ class VideoRunner:
                     current_seconds: v.currentTime || 0,
                     duration_seconds: v.duration || 0,
                     current_text: fmt(v.currentTime || 0),
-                    duration_text: fmt(v.duration || 0)
+                    duration_text: fmt(v.duration || 0),
+                    paused: !!v.paused
                 };
                 """
             ) or {}

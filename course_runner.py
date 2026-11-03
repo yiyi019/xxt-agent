@@ -397,9 +397,21 @@ class CourseRunner:
             return False
 
     def _fold_sidebar(self) -> None:
-        """Folds side chapter menu for unobstructed layout."""
+        """Folds side chapter menu for unobstructed layout and injects anti-blur focus protection."""
         try:
             self.driver.switch_to.default_content()
+            self.driver.execute_script(
+                """
+                window.onblur = null;
+                window.onfocus = null;
+                window.onmouseleave = null;
+                document.onvisibilitychange = null;
+                try {
+                    Object.defineProperty(document, 'hidden', { get: function() { return false; }, configurable: true });
+                    Object.defineProperty(document, 'visibilityState', { get: function() { return 'visible'; }, configurable: true });
+                } catch(e){}
+                """
+            )
             fold_btn = self.driver.find_elements(By.XPATH, '//*[@id="selector"]/div[2]')
             if fold_btn:
                 fold_btn[0].click()
