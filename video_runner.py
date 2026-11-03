@@ -118,15 +118,23 @@ class VideoRunner:
         while True:
             time.sleep(1)
 
-            # Check face popup
-            if self.face_bypass.is_popup_present():
-                logger.info("Face popup detected during video playback")
-                self._emit("face_popup_detected", {"video_index": index})
-                self.face_bypass.bypass()
-                # Restore iframe context
+            # Check face popup in top-level document
+            try:
                 self.driver.switch_to.default_content()
-                self.driver.switch_to.frame("iframe")
-                self.driver.switch_to.frame(vido_iframe)
+                if self.face_bypass.is_popup_present():
+                    logger.info("Face popup detected during video playback")
+                    self._emit("face_popup_detected", {"video_index": index})
+                    self.face_bypass.bypass()
+            except Exception:
+                pass
+            finally:
+                # Restore video iframe context
+                try:
+                    self.driver.switch_to.default_content()
+                    self.driver.switch_to.frame("iframe")
+                    self.driver.switch_to.frame(vido_iframe)
+                except Exception:
+                    pass
 
             # Check in-video quiz
             self._check_and_solve_in_video_quiz()

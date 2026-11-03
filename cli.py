@@ -91,14 +91,14 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser = subparsers.add_parser("run", parents=[common], help="Run automated study on a specified course.")
     run_parser.add_argument("--course", "-c", required=True, help="Course title to run.")
     run_parser.add_argument("--duration", "-d", type=int, default=3600, help="Maximum run duration in seconds (default: 3600).")
-    run_parser.add_argument("--speed", "-s", type=float, default=2.0, help="Playback speed (e.g. 1.0, 2.0, 4.0).")
+    run_parser.add_argument("--speed", "-s", type=float, default=1.0, help="Playback speed (e.g. 1.0, 2.0).")
     run_parser.add_argument("--max-chapters", "-m", type=int, default=15, help="Maximum number of chapters to process.")
     run_parser.add_argument("--tui", action="store_true", help="Launch interactive Terminal UI (TUI) dashboard.")
 
     # Command: tui
     tui_parser = subparsers.add_parser("tui", parents=[common], help="Launch interactive Terminal UI (TUI) dashboard.")
     tui_parser.add_argument("--course", "-c", default="艺术鉴赏", help="Course title to run (default: 艺术鉴赏).")
-    tui_parser.add_argument("--speed", "-s", type=float, default=2.0, help="Playback speed (default: 2.0).")
+    tui_parser.add_argument("--speed", "-s", type=float, default=1.0, help="Playback speed (default: 1.0).")
     tui_parser.add_argument("--max-chapters", "-m", type=int, default=15, help="Maximum chapters (default: 15).")
 
     # Command: solve

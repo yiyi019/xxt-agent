@@ -37,8 +37,11 @@ class FaceBypass:
     POPUP_SELECTORS = [
         ".chapterVideoFaceMaskDiv",
         ".maskDiv",
+        ".maskDiv1",
         ".chapterVideoFaceQrMaskDiv",
         ".faceCollectQrPop",
+        ".faceCollectQrPopVideo",
+        ".popDiv1.wid640",
         ".popDiv.wid640.faceCollectQrPop.popClass",
         ".maskDiv1.chapterVideoFaceQrMaskDiv",
         ".maskDiv1.starttippop.faceRecognition_1.chapterVideoFaceMaskDiv",
@@ -51,8 +54,14 @@ class FaceBypass:
         self.http = requests.Session()
         self.is_processing = False
 
-    def is_popup_present(self) -> bool:
+    def is_popup_present(self, check_top: bool = False) -> bool:
         """Checks if a face verification modal or mask is currently displayed."""
+        if check_top:
+            try:
+                self.driver.switch_to.default_content()
+            except Exception:
+                pass
+
         for sel in self.POPUP_SELECTORS:
             try:
                 elements = self.driver.find_elements("css selector", sel)
@@ -366,6 +375,11 @@ class FaceBypass:
         """Removes popup elements from the DOM so automation is not blocked."""
         removed_any = False
         try:
+            try:
+                self.driver.switch_to.default_content()
+            except Exception:
+                pass
+
             for sel in self.POPUP_SELECTORS:
                 script = f"""
                 var els = document.querySelectorAll('{sel}');
@@ -376,6 +390,20 @@ class FaceBypass:
                 count = self.driver.execute_script(script)
                 if count and count > 0:
                     removed_any = True
+
+            cleanup_script = """
+            var count = 0;
+            var els = document.querySelectorAll('.popDiv1, .maskDiv1, .faceCollectQrPopVideo, [class*="faceCollect"]');
+            els.forEach(function(el) { el.remove(); count++; });
+            document.querySelectorAll('a, span, button').forEach(function(el) {
+                if (el.innerText && el.innerText.trim() === '知道了') el.click();
+            });
+            return count;
+            """
+            extra = self.driver.execute_script(cleanup_script)
+            if extra and extra > 0:
+                removed_any = True
+
             logger.info(f"Force removed face popup modal from DOM: {removed_any}")
             return removed_any
         except Exception as e:
