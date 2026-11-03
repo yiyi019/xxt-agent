@@ -6,15 +6,41 @@ Supports deterministic JSON outputs and structured error codes for AI agents.
 import sys
 import json
 import argparse
+import unicodedata
 from typing import Any, Optional, List
+
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 from xxt_agent.config import XXTConfig
 from xxt_agent.ai_solver import DeepSeekSolver
 
+def _sanitize_data(data: Any) -> Any:
+    if isinstance(data, str):
+        return unicodedata.normalize("NFKC", data).replace("\xa0", " ")
+    if isinstance(data, dict):
+        return {k: _sanitize_data(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [_sanitize_data(x) for x in data]
+    return data
+
 def output_result(data: Any, is_json: bool):
     """Output structured data to stdout."""
+    data = _sanitize_data(data)
     if is_json:
-        print(json.dumps(data, ensure_ascii=False, indent=2))
+        out_str = json.dumps(data, ensure_ascii=False, indent=2)
+        try:
+            print(out_str)
+        except UnicodeEncodeError:
+            print(out_str.encode("utf-8", errors="replace").decode(sys.stdout.encoding or "utf-8", errors="replace"))
     else:
         if isinstance(data, dict):
             for k, v in data.items():
@@ -26,45 +52,48 @@ def output_result(data: Any, is_json: bool):
             print(data)
 
 def build_parser() -> argparse.ArgumentParser:
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Output results strictly in JSON format.")
+    common.add_argument("--format", choices=["json", "text"], default=argparse.SUPPRESS, help="Output format.")
+    common.add_argument("--gui", action="store_true", default=argparse.SUPPRESS, help="Disable headless mode and show browser UI.")
+
     parser = argparse.ArgumentParser(
+        parents=[common],
         description="Xuexitong Agent CLI - Lightweight course automation optimized for AI agents."
     )
-    parser.add_argument("--json", action="store_true", help="Output results strictly in JSON format.")
-    parser.add_argument("--format", choices=["json", "text"], default="text", help="Output format.")
-    parser.add_argument("--gui", action="store_true", help="Disable headless mode and show browser UI.")
 
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
     # Command: status
-    subparsers.add_parser("status", help="Check system readiness, driver, cookies, and AI keys.")
+    subparsers.add_parser("status", parents=[common], help="Check system readiness, driver, cookies, and AI keys.")
 
     # Command: config
-    cfg_parser = subparsers.add_parser("config", help="Configuration operations.")
+    cfg_parser = subparsers.add_parser("config", parents=[common], help="Configuration operations.")
     cfg_parser.add_argument("config_action", nargs="?", default="show", choices=["show"], help="Config action (default: show).")
 
     # Command: list-courses
-    subparsers.add_parser("list-courses", help="Retrieve all enrolled courses under current account.")
-    subparsers.add_parser("courses", help="Alias for list-courses.")
+    subparsers.add_parser("list-courses", parents=[common], help="Retrieve all enrolled courses under current account.")
+    subparsers.add_parser("courses", parents=[common], help="Alias for list-courses.")
 
     # Command: chapters
-    cap_parser = subparsers.add_parser("chapters", help="List chapters for a specific course.")
+    cap_parser = subparsers.add_parser("chapters", parents=[common], help="List chapters for a specific course.")
     cap_parser.add_argument("--course", "-c", required=True, help="Course title to inspect.")
 
     # Command: run
-    run_parser = subparsers.add_parser("run", help="Run automated study on a specified course.")
+    run_parser = subparsers.add_parser("run", parents=[common], help="Run automated study on a specified course.")
     run_parser.add_argument("--course", "-c", required=True, help="Course title to run.")
     run_parser.add_argument("--duration", "-d", type=int, default=3600, help="Maximum run duration in seconds (default: 3600).")
     run_parser.add_argument("--speed", "-s", type=float, default=2.0, help="Playback speed (e.g. 1.0, 2.0, 4.0).")
     run_parser.add_argument("--max-chapters", "-m", type=int, default=15, help="Maximum number of chapters to process.")
 
     # Command: solve
-    solve_parser = subparsers.add_parser("solve", help="Directly solve a question via DeepSeek AI.")
+    solve_parser = subparsers.add_parser("solve", parents=[common], help="Directly solve a question via DeepSeek AI.")
     solve_parser.add_argument("--question", "-q", required=True, help="Question text.")
     solve_parser.add_argument("--type", "-t", default="单选题", help="Question type (单选题, 多选题, 判断题, 填空题, 简答题).")
     solve_parser.add_argument("--options", "-o", action="append", default=[], help="Candidate option (can be repeated).")
 
     # Command: tools
-    subparsers.add_parser("tools", help="Export Agent Tool Definition (JSON Schema for LLM function calling).")
+    subparsers.add_parser("tools", parents=[common], help="Export Agent Tool Definition (JSON Schema for LLM function calling).")
 
     return parser
 
@@ -83,7 +112,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         is_json = True
 
     config = XXTConfig.load()
-    if args.gui:
+    if getattr(args, "gui", False):
         config.headless = False
 
     try:
@@ -95,6 +124,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             import os
             res = {
                 "ok": True,
+                "phone_configured": bool(config.phone_number),
                 "browser": config.browser,
                 "driver_path": config.driver_path,
                 "driver_exists": bool(config.driver_path and os.path.exists(config.driver_path)),
@@ -102,7 +132,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "api_key_configured": bool(config.api_key and "sk-" in config.api_key),
                 "deepseek_model": config.api_model,
                 "headless_mode": config.headless,
-                "default_speed": config.speed
+                "default_speed": config.speed,
+                "default_courses": config.default_courses
             }
             output_result(res, is_json)
             return 0

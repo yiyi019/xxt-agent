@@ -173,6 +173,54 @@ class CourseRunner:
 
         raise CourseNotFoundError(course_name)
 
+    def get_chapters(self, course_name: str) -> List[dict]:
+        """Inspects and returns the chapter list for a given course."""
+        self.select_course(course_name)
+        time.sleep(2)
+        try:
+            navs = self.driver.find_elements(By.CLASS_NAME, "nav_content")
+            if not navs:
+                navs = self.driver.find_elements(By.CSS_SELECTOR, "li[data-nav-name='章节']")
+            for nav in navs:
+                if "章节" in nav.text:
+                    nav.click()
+                    time.sleep(1)
+                    break
+        except Exception:
+            pass
+
+        self.driver.switch_to.default_content()
+        frames = self.driver.find_elements(By.TAG_NAME, "iframe")
+        for f in frames:
+            try:
+                src = f.get_attribute("src") or ""
+                if "courselist" in src or "catalog" in src or "work" in src:
+                    self.driver.switch_to.frame(f)
+                    break
+            except Exception:
+                pass
+
+        chapters = []
+        nodes = self.driver.find_elements(By.CSS_SELECTOR, ".posCatalog_name, .catalog_name, .level_two")
+        for idx, n in enumerate(nodes):
+            t = n.get_attribute("title") or n.text.strip()
+            if t:
+                try:
+                    parent = n.find_element(By.XPATH, "..")
+                    parent_html = parent.get_attribute("innerHTML") or ""
+                except Exception:
+                    parent_html = ""
+                has_mission = "catalog_tishi" in parent_html or "ans-job-icon" in parent_html
+                completed = "icon_complete" in parent_html or ("catalog_tishi" not in parent_html and "ans-job-icon-clear" not in parent_html)
+                chapters.append({
+                    "index": idx + 1,
+                    "title": t,
+                    "has_mission": has_mission,
+                    "completed": completed
+                })
+        self.driver.switch_to.default_content()
+        return chapters
+
     def find_and_enter_mission_point(self, course_name: str) -> bool:
         """Locates the first unfinished chapter mission point and opens it."""
         try:
