@@ -89,7 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Command: run
     run_parser = subparsers.add_parser("run", parents=[common], help="Run automated study on a specified course.")
-    run_parser.add_argument("--course", "-c", required=True, help="Course title to run.")
+    run_parser.add_argument("--course", "-c", default=None, help="Course title to run (default: from config).")
     run_parser.add_argument("--duration", "-d", type=int, default=3600, help="Maximum run duration in seconds (default: 3600).")
     run_parser.add_argument("--speed", "-s", type=float, default=1.0, help="Playback speed (e.g. 1.0, 2.0).")
     run_parser.add_argument("--max-chapters", "-m", type=int, default=15, help="Maximum number of chapters to process.")
@@ -222,7 +222,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         elif args.command == "tui" or (args.command == "run" and getattr(args, "tui", False)):
             course = getattr(args, "course", None)
-            if not course or not course.strip() or "\ufffd" in course:
+            if not course or not course.strip() or "\ufffd" in course or "?" in course:
                 course = config.default_courses[0] if config.default_courses else "艺术鉴赏"
             if getattr(args, "speed", None):
                 config.speed = args.speed
@@ -232,9 +232,14 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         elif args.command == "run":
             from xxt_agent.agent import XXTAgent
+            course = getattr(args, "course", None)
+            if not course or not course.strip() or "\ufffd" in course or "?" in course:
+                course = config.default_courses[0] if config.default_courses else "艺术鉴赏"
+            if getattr(args, "speed", None):
+                config.speed = args.speed
             with XXTAgent(config) as agent:
                 res = agent.run_course(
-                    course_name=args.course,
+                    course_name=course,
                     max_chapters=args.max_chapters
                 )
                 output_result(res.to_dict() if hasattr(res, "to_dict") else res, is_json)
