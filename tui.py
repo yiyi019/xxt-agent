@@ -55,7 +55,7 @@ class AgentTUI:
             "current_time": self.current_time_str,
             "duration": self.duration_str,
             "speed": self.config.speed,
-            "video_index": self.current_video_idx + 1,
+            "video_index": self.current_video_idx,
             "total_videos": self.total_videos,
             "chapters_completed": self.chapters_completed,
             "face_bypasses": self.face_bypass_count,
@@ -102,16 +102,16 @@ class AgentTUI:
             self.add_event("视频发现", "magenta", f"当前章节共发现 {self.total_videos} 个视频任务")
 
         elif etype == "video_start":
-            self.current_video_idx = edata.get("index", 0)
-            self.total_videos = edata.get("total", 0)
-            self.status_text = f"正在播放第 {self.current_video_idx + 1}/{self.total_videos} 个视频 (倍速: {self.config.speed}x)"
-            self.add_event("视频开始", "blue", f"开始播放视频 [{self.current_video_idx + 1}/{self.total_videos}]，倍速 {self.config.speed}x")
+            self.current_video_idx = edata.get("index", 1)
+            self.total_videos = edata.get("total", 1)
+            self.status_text = f"正在播放第 {self.current_video_idx}/{self.total_videos} 个视频 (倍速: {self.config.speed}x)"
+            self.add_event("视频开始", "blue", f"开始播放视频 [{self.current_video_idx}/{self.total_videos}]，倍速 {self.config.speed}x")
 
         elif etype == "video_progress":
             self.current_percent = edata.get("percent", 0.0)
             self.current_time_str = edata.get("current", "00:00")
             self.duration_str = edata.get("duration", "00:00")
-            self.status_text = f"正在播放第 {self.current_video_idx + 1} 个视频: {self.current_percent}% ({self.current_time_str} / {self.duration_str})"
+            self.status_text = f"正在播放第 {self.current_video_idx} 个视频: {self.current_percent}% ({self.current_time_str} / {self.duration_str})"
 
             # Heartbeat print every 10s for non-TTY
             if not sys.stdout.isatty() and (time.time() - self.last_flush_time >= 10):
@@ -139,14 +139,14 @@ class AgentTUI:
             self.add_event("任务圆满", "bold magenta", "所有目标章节均已刷完！")
 
     def make_header(self) -> Panel:
-        title = Text("🤖 Xuexitong Agent TUI · 学习通智能体终端控制台", style="bold white on blue", justify="center")
+        title = Text("=== Xuexitong Agent TUI · 学习通智能体终端监控控制台 ===", style="bold white on blue", justify="center")
         return Panel(title, style="blue")
 
     def make_metrics_table(self) -> Table:
         table = Table(expand=True, box=None, padding=(0, 1))
-        table.add_column("📌 目标信息", style="bold cyan")
-        table.add_column("🛡️ 防护状态", style="bold green")
-        table.add_column("⚡ 运行性能", style="bold yellow")
+        table.add_column("目标信息", style="bold cyan")
+        table.add_column("防护状态", style="bold green")
+        table.add_column("运行性能", style="bold yellow")
 
         elapsed_sec = int(time.time() - self.start_time)
         elapsed_str = f"{elapsed_sec // 60:02d}:{elapsed_sec % 60:02d}"
@@ -156,12 +156,12 @@ class AgentTUI:
 
         table.add_row(
             f"课程: [white]{self.course_name}[/white]",
-            f"切屏防失焦: [green]✔ 已激活[/green]",
+            f"切屏防失焦: [green][OK] 已激活[/green]",
             f"播放倍速: [white]{self.config.speed}x (静音)[/white]"
         )
         table.add_row(
             f"账号: [white]{masked_phone}[/white]",
-            f"人脸自动跳过: [green]✔ 已拦截 {self.face_bypass_count} 次[/green]",
+            f"人脸自动跳过: [green][OK] 拦截 {self.face_bypass_count} 次[/green]",
             f"AI 模型: [white]{self.config.api_model} (在线)[/white]"
         )
         table.add_row(
@@ -174,13 +174,13 @@ class AgentTUI:
     def make_progress_panel(self) -> Panel:
         pct = max(0.0, min(100.0, self.current_percent))
         filled = int(pct / 2.5)
-        bar = "━" * filled + " " * (40 - filled)
+        bar = "=" * filled + " " * (40 - filled)
         
         text = Text()
-        text.append(f" 🎬 视频进度: [{bar}] ", style="bold green")
+        text.append(f" [视频进度] [{bar}] ", style="bold green")
         text.append(f"{pct:.1f}% ", style="bold yellow")
         text.append(f"({self.current_time_str} / {self.duration_str})\n", style="white")
-        text.append(f" 📚 章节累计: 已完成 {self.chapters_completed} 节任务点", style="cyan")
+        text.append(f" [章节累计] 已完成 {self.chapters_completed} 节任务点", style="cyan")
         
         return Panel(text, title="[bold]实 时 进 度 监 控[/bold]", border_style="cyan")
 

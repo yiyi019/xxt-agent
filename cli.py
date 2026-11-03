@@ -221,7 +221,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
 
         elif args.command == "tui" or (args.command == "run" and getattr(args, "tui", False)):
-            course = getattr(args, "course", "艺术鉴赏")
+            course = getattr(args, "course", None)
+            if not course or not course.strip() or "\ufffd" in course:
+                course = config.default_courses[0] if config.default_courses else "艺术鉴赏"
             if getattr(args, "speed", None):
                 config.speed = args.speed
             max_c = getattr(args, "max_chapters", 15)

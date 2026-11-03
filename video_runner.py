@@ -139,7 +139,7 @@ class VideoRunner:
             duration_str = times.get("duration_text", "")
 
             # Check completion via parent job icon
-            if self._is_job_finished(index - 1):
+            if self._is_job_finished(vido_iframe, index - 1):
                 logger.info(f"Video {index}/{total} completed successfully")
                 self._emit("video_finished", {
                     "index": index,
@@ -260,8 +260,9 @@ class VideoRunner:
         except Exception:
             return {}
 
-    def _is_job_finished(self, icon_index: int) -> bool:
-        """Switches briefly to parent iframe to check if task point icon shows finished."""
+    def _is_job_finished(self, vido_iframe, icon_index: int) -> bool:
+        """Switches briefly to parent iframe to check if task point icon shows finished, then restores video iframe."""
+        is_finished = False
         try:
             self.driver.switch_to.parent_frame()
             icons = self.driver.find_elements(By.CLASS_NAME, "ans-job-icon-clear ")
@@ -270,10 +271,15 @@ class VideoRunner:
                 parent = icon.find_element(By.XPATH, "..")
                 parent_class = parent.get_attribute("class") or ""
                 label = icon.get_attribute("aria-label") or ""
-                return "ans-job-finished" in parent_class or label == "任务点已完成"
+                is_finished = "ans-job-finished" in parent_class or label == "任务点已完成"
         except Exception:
             pass
-        return False
+        finally:
+            try:
+                self.driver.switch_to.frame(vido_iframe)
+            except Exception:
+                pass
+        return is_finished
 
     def _check_and_solve_in_video_quiz(self) -> None:
         """Detects in-video quiz modal (.tkTopic) and answers it using DeepSeek or random choice."""
