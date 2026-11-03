@@ -267,16 +267,22 @@ class VideoRunner:
                     if (arguments[0] && arguments[0] > 0) {
                         v.playbackRate = arguments[0];
                     }
-                    // Override video.pause so clicking pause or window blur CANNOT pause it
+                    // Override video.pause so clicking pause or window blur CANNOT pause it mid-play,
+                    // but allow pause when video has naturally reached the end
                     v._orig_pause = v.pause;
                     v.pause = function() {
+                        var vid = document.querySelector('video');
+                        if (vid && (vid.ended || (vid.duration && vid.currentTime >= vid.duration - 1))) {
+                            if (v._orig_pause) v._orig_pause.call(v);
+                            return;
+                        }
                         console.log('[xxt_agent] Pause blocked by Auto-Play Blocker');
                     };
                     // 500ms auto-play heartbeat interval (reference project content.js)
                     if (!window._auto_play_interval) {
                         window._auto_play_interval = setInterval(function() {
                             var vid = document.querySelector('video');
-                            if (vid && vid.paused) {
+                            if (vid && vid.paused && !vid.ended && (!vid.duration || vid.currentTime < (vid.duration - 1))) {
                                 vid.muted = true;
                                 vid.play().catch(function(){});
                             }
@@ -333,12 +339,14 @@ class VideoRunner:
             self.driver.switch_to.default_content()
             self.driver.switch_to.frame("iframe")
             icons = self.driver.find_elements(By.CLASS_NAME, "ans-job-icon-clear ")
+            if not icons:
+                icons = self.driver.find_elements(By.CSS_SELECTOR, '[class*="ans-insertvideo-online"], [class*="ans-job-icon"]')
             if 0 <= icon_index < len(icons):
                 icon = icons[icon_index]
                 parent = icon.find_element(By.XPATH, "..")
                 parent_class = parent.get_attribute("class") or ""
                 label = icon.get_attribute("aria-label") or ""
-                is_finished = "ans-job-finished" in parent_class or label == "任务点已完成"
+                is_finished = "ans-job-finished" in parent_class or label == "任务点已完成" or "ans-attach-ct ans-job-finished" in parent_class
         except Exception:
             pass
         finally:

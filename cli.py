@@ -232,12 +232,14 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         elif args.command == "run":
             from xxt_agent.agent import XXTAgent
+            from xxt_agent.tui import AgentTUI
             course = getattr(args, "course", None)
             if not course or not course.strip() or "\ufffd" in course or "?" in course:
                 course = config.default_courses[0] if config.default_courses else "艺术鉴赏"
             if getattr(args, "speed", None):
                 config.speed = args.speed
-            with XXTAgent(config) as agent:
+            tui = AgentTUI(course, config)
+            with XXTAgent(config, event_callback=tui.handle_event) as agent:
                 res = agent.run_course(
                     course_name=course,
                     max_chapters=args.max_chapters

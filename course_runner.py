@@ -305,31 +305,56 @@ class CourseRunner:
 
                 # 2. Process tasks on current chapter page
                 self._fold_sidebar()
-                content_types = self._detect_page_contents()
-                logger.info(f"Chapter content detected: {list(content_types.keys())}")
-                self._emit(RunEvent(event_type="chapter_content_detected", data={"types": list(content_types.keys())}))
+                chapter_title = self._get_current_chapter_title()
+                logger.info(f"--- Processing Chapter {chapters_done + 1}: {chapter_title} ---")
 
-                if "视频" in content_types:
-                    summary.videos_completed += self.video_runner.process_chapter_videos(course_name)
+                # Iterate through all sub-tabs (e.g. 1 视频, 2 章节测验) in current chapter
+                self.driver.switch_to.default_content()
+                sub_tabs = self.driver.find_elements(By.CSS_SELECTOR, ".prev_ul li")
+                total_tabs = max(1, len(sub_tabs))
+                logger.info(f"Chapter '{chapter_title}' contains {total_tabs} sub-tab(s)")
 
-                if "测验" in content_types and self.config.quiz_solve_mode != "skip":
-                    summary.quizzes_completed += self.quiz_runner.process_chapter_quizzes(course_name)
+                for tab_idx in range(total_tabs):
+                    self.driver.switch_to.default_content()
+                    if total_tabs > 1:
+                        sub_tabs = self.driver.find_elements(By.CSS_SELECTOR, ".prev_ul li")
+                        if tab_idx < len(sub_tabs):
+                            target_tab = sub_tabs[tab_idx]
+                            raw_t = target_tab.get_attribute("title") or target_tab.text.strip()
+                            clean_t = re.sub(r"[\u200b\s]+", " ", raw_t).strip()
+                            logger.info(f"Switching to chapter sub-tab {tab_idx + 1}/{total_tabs}: {clean_t}")
+                            self.driver.execute_script("arguments[0].click();", target_tab)
+                            time.sleep(2)
 
-                if "ppt" in content_types:
-                    summary.ppt_completed += self.ppt_handler.process(course_name)
+                    # Face check on sub-tab
+                    if self.config.pass_face and self.face_bypass.is_popup_present():
+                        self.face_bypass.bypass()
 
-                if "阅读" in content_types:
-                    summary.reading_completed += self.reading_handler.process(course_name)
+                    content_types = self._detect_page_contents()
+                    logger.info(f"Sub-tab {tab_idx + 1}/{total_tabs} content detected: {list(content_types.keys())}")
+                    self._emit(RunEvent(event_type="chapter_content_detected", data={"types": list(content_types.keys()), "tab": tab_idx + 1}))
 
-                if "音频" in content_types:
-                    summary.audio_completed += self.audio_handler.process(course_name)
+                    if "视频" in content_types:
+                        summary.videos_completed += self.video_runner.process_chapter_videos(course_name)
 
-                if "讨论" in content_types:
-                    self.discussion_handler.process(course_name)
+                    if "测验" in content_types and self.config.quiz_solve_mode != "skip":
+                        summary.quizzes_completed += self.quiz_runner.process_chapter_quizzes(course_name)
+
+                    if "ppt" in content_types:
+                        summary.ppt_completed += self.ppt_handler.process(course_name)
+
+                    if "阅读" in content_types:
+                        summary.reading_completed += self.reading_handler.process(course_name)
+
+                    if "音频" in content_types:
+                        summary.audio_completed += self.audio_handler.process(course_name)
+
+                    if "讨论" in content_types:
+                        self.discussion_handler.process(course_name)
 
                 chapters_done += 1
                 summary.chapters_processed = chapters_done
-                self._emit(RunEvent(event_type="chapter_completed", data={"chapter_index": chapters_done}))
+                self._emit(RunEvent(event_type="chapter_completed", data={"chapter_index": chapters_done, "title": chapter_title}))
 
                 if max_chapters and chapters_done >= max_chapters:
                     logger.info(f"Reached max requested chapters ({max_chapters}); stopping")
@@ -381,20 +406,137 @@ class CourseRunner:
 
         return result
 
-    def _click_next_page(self) -> bool:
-        """Clicks next chapter button (#prevNextFocusNext)."""
-        next_btn_xpath = '//*[@id="prevNextFocusNext"]'
+    def _get_current_chapter_title(self) -> str:
+        """Retrieves title of the currently loaded chapter."""
         try:
-            btn = self.driver.find_element(By.XPATH, next_btn_xpath)
-            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
-            time.sleep(0.5)
-            self.driver.execute_script("arguments[0].click();", btn)
-            return True
-        except (ElementNotInteractableException, NoSuchElementException):
-            return False
+            self.driver.switch_to.default_content()
+            els = self.driver.find_elements(By.CSS_SELECTOR, ".prev_title")
+            if els:
+                t = els[0].get_attribute("title") or els[0].text.strip()
+                return re.sub(r"[\u200b\s]+", " ", t).strip()
+        except Exception:
+            pass
+        return ""
+
+    def _navigate_to_next_chapter_via_sidebar(self) -> bool:
+        """Fallback chapter navigation: finds and clicks the next unfinished chapter in the sidebar."""
+        try:
+            self.driver.switch_to.default_content()
+            next_chapter_el = self.driver.execute_script(
+                """
+                var currentTitle = ((document.querySelector('.prev_title') || {}).getAttribute('title') || '').trim();
+                var items = Array.from(document.querySelectorAll('.posCatalog_select'));
+                
+                var currentIdx = -1;
+                for (var i = 0; i < items.length; i++) {
+                    var nameEl = items[i].querySelector('.posCatalog_name');
+                    var t = nameEl ? (nameEl.getAttribute('title') || nameEl.innerText.trim()) : '';
+                    if (currentTitle && t && (t === currentTitle || t.includes(currentTitle) || currentTitle.includes(t))) {
+                        currentIdx = i;
+                        break;
+                    }
+                }
+                
+                // 1. Search for next unfinished chapter after currentIdx
+                for (var j = currentIdx + 1; j < items.length; j++) {
+                    var pointsEl = items[j].querySelector('.catalog_points_yi .orangeNew, .catalog_tishi, .catalog_tishi120');
+                    var nameEl = items[j].querySelector('.posCatalog_name');
+                    if (pointsEl && nameEl) {
+                        return nameEl;
+                    }
+                }
+                
+                // 2. Search for any unfinished chapter from beginning
+                for (var k = 0; k < items.length; k++) {
+                    var pointsEl = items[k].querySelector('.catalog_points_yi .orangeNew, .catalog_tishi, .catalog_tishi120');
+                    var nameEl = items[k].querySelector('.posCatalog_name');
+                    if (pointsEl && nameEl) {
+                        return nameEl;
+                    }
+                }
+                return null;
+                """
+            )
+            if next_chapter_el:
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_chapter_el)
+                time.sleep(0.5)
+                self.driver.execute_script("arguments[0].click();", next_chapter_el)
+                time.sleep(3)
+                logger.info("Successfully navigated to next chapter via sidebar catalog")
+                return True
         except Exception as e:
-            logger.debug(f"Click next page exception: {e}")
-            return False
+            logger.debug(f"Sidebar catalog navigation fallback failed: {e}")
+        return False
+
+    def _click_next_page(self) -> bool:
+        """Clicks next chapter button, handles confirmation dialogs, and falls back to sidebar catalog navigation."""
+        self.driver.switch_to.default_content()
+        curr_url = self.driver.current_url
+        curr_title = self._get_current_chapter_title()
+        logger.info(f"Advancing from current chapter '{curr_title}' to next chapter...")
+
+        # 1. Try standard next buttons: #prevNextFocusNext, .nextChapter, .prev_next.next
+        next_selectors = [
+            '//*[@id="prevNextFocusNext"]',
+            '//div[contains(@class, "prev_next")]//a[contains(text(), "下一节")]',
+            '//div[contains(@class, "prev_next")]//div[contains(text(), "下一节")]',
+            '//a[contains(@class, "nextChapter")]',
+        ]
+        for xpath in next_selectors:
+            try:
+                btns = self.driver.find_elements(By.XPATH, xpath)
+                for btn in btns:
+                    if btn.is_displayed():
+                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
+                        time.sleep(0.3)
+                        self.driver.execute_script("arguments[0].click();", btn)
+                        break
+            except Exception:
+                continue
+
+        time.sleep(1.5)
+
+        # 2. Check and handle confirmation popups
+        try:
+            # Check modal nextChapter button (e.g. .jobFinishTip "当前章节还有任务点未完成，是否去完成？")
+            confirm_btns = self.driver.find_elements(
+                By.CSS_SELECTOR,
+                ".jobFinishTip .nextChapter, #mainid div.popBottom a.nextChapter, a.nextChapter, #popok"
+            )
+            for c_btn in confirm_btns:
+                if c_btn.is_displayed() or c_btn.get_attribute("class"):
+                    self.driver.execute_script("arguments[0].click();", c_btn)
+                    time.sleep(1)
+                    break
+
+            # Reference project modal confirm: //*[@id="mainid"]/div[1]/div/div[3]/a[2]
+            ref_confirm = self.driver.find_elements(By.XPATH, '//*[@id="mainid"]/div[1]/div/div[3]/a[2]')
+            if ref_confirm and ref_confirm[0].is_displayed():
+                self.driver.execute_script("arguments[0].click();", ref_confirm[0])
+                time.sleep(1)
+        except Exception as e:
+            logger.debug(f"Confirmation modal handling: {e}")
+
+        # Check JS alert if any
+        try:
+            alert = self.driver.switch_to.alert
+            alert.accept()
+        except Exception:
+            pass
+
+        time.sleep(2)
+
+        # 3. Verify if chapter changed
+        self.driver.switch_to.default_content()
+        new_url = self.driver.current_url
+        new_title = self._get_current_chapter_title()
+        if (new_url != curr_url) or (new_title and new_title != curr_title):
+            logger.info(f"Successfully transitioned to next chapter: {new_title}")
+            return True
+
+        # 4. Fallback: If still on same chapter, locate and click next chapter in sidebar catalog
+        logger.info("Next page button did not change chapter; trying sidebar catalog navigation fallback...")
+        return self._navigate_to_next_chapter_via_sidebar()
 
     def _fold_sidebar(self) -> None:
         """Folds side chapter menu for unobstructed layout and injects anti-blur focus protection."""
