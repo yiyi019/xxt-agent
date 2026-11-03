@@ -3,9 +3,12 @@
 Agent-Optimized Command Line Interface (CLI) for Xuexitong Agent.
 Supports deterministic JSON outputs and structured error codes for AI agents.
 """
+import os
 import sys
 import json
+import time
 import argparse
+import threading
 import unicodedata
 from typing import Any, Optional, List
 
@@ -22,6 +25,8 @@ if sys.stderr and hasattr(sys.stderr, "reconfigure"):
 
 from xxt_agent.config import XXTConfig
 from xxt_agent.ai_solver import DeepSeekSolver
+
+STATUS_FILE = r"D:\Xuexitong_shuake\live_status.json"
 
 def _sanitize_data(data: Any) -> Any:
     if isinstance(data, str):
@@ -67,6 +72,9 @@ def build_parser() -> argparse.ArgumentParser:
     # Command: status
     subparsers.add_parser("status", parents=[common], help="Check system readiness, driver, cookies, and AI keys.")
 
+    # Command: live-status
+    subparsers.add_parser("live-status", parents=[common], help="Inspect live real-time course playback metrics.")
+
     # Command: config
     cfg_parser = subparsers.add_parser("config", parents=[common], help="Configuration operations.")
     cfg_parser.add_argument("config_action", nargs="?", default="show", choices=["show"], help="Config action (default: show).")
@@ -85,6 +93,13 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--duration", "-d", type=int, default=3600, help="Maximum run duration in seconds (default: 3600).")
     run_parser.add_argument("--speed", "-s", type=float, default=2.0, help="Playback speed (e.g. 1.0, 2.0, 4.0).")
     run_parser.add_argument("--max-chapters", "-m", type=int, default=15, help="Maximum number of chapters to process.")
+    run_parser.add_argument("--tui", action="store_true", help="Launch interactive Terminal UI (TUI) dashboard.")
+
+    # Command: tui
+    tui_parser = subparsers.add_parser("tui", parents=[common], help="Launch interactive Terminal UI (TUI) dashboard.")
+    tui_parser.add_argument("--course", "-c", default="艺术鉴赏", help="Course title to run (default: 艺术鉴赏).")
+    tui_parser.add_argument("--speed", "-s", type=float, default=2.0, help="Playback speed (default: 2.0).")
+    tui_parser.add_argument("--max-chapters", "-m", type=int, default=15, help="Maximum chapters (default: 15).")
 
     # Command: solve
     solve_parser = subparsers.add_parser("solve", parents=[common], help="Directly solve a question via DeepSeek AI.")
@@ -96,6 +111,44 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("tools", parents=[common], help="Export Agent Tool Definition (JSON Schema for LLM function calling).")
 
     return parser
+
+def run_tui_mode(course_name: str, config: XXTConfig, max_chapters: int = 15):
+    from rich.live import Live
+    from xxt_agent.tui import AgentTUI
+    from xxt_agent.agent import XXTAgent
+
+    tui = AgentTUI(course_name, config)
+    agent = XXTAgent(config, event_callback=tui.handle_event)
+
+    def worker():
+        try:
+            with agent:
+                agent.run_course(course_name, max_chapters=max_chapters)
+        except Exception as e:
+            tui.add_event("运行异常", "bold red", str(e))
+        finally:
+            tui.status_text = "本次刷课运行结束。"
+
+    th = threading.Thread(target=worker, daemon=True)
+    th.start()
+
+    try:
+        if sys.stdout.isatty():
+            with Live(tui.render(), refresh_per_second=4, screen=False) as live:
+                while th.is_alive():
+                    live.update(tui.render())
+                    time.sleep(0.25)
+                live.update(tui.render())
+                time.sleep(2)
+        else:
+            # Fallback for redirected streams / non-TTY
+            print(f"[TUI Headless Mode Started] Course: {course_name} | Max Chapters: {max_chapters}", flush=True)
+            while th.is_alive():
+                time.sleep(1)
+            print("[TUI Headless Mode Finished]", flush=True)
+    except KeyboardInterrupt:
+        tui.add_event("用户中断", "bold yellow", "收到退出指令，正在关闭后台浏览器...")
+        agent.close()
 
 def main(argv: Optional[List[str]] = None) -> int:
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
@@ -121,7 +174,6 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
 
         elif args.command == "status":
-            import os
             res = {
                 "ok": True,
                 "phone_configured": bool(config.phone_number),
@@ -138,6 +190,20 @@ def main(argv: Optional[List[str]] = None) -> int:
             output_result(res, is_json)
             return 0
 
+        elif args.command == "live-status":
+            if os.path.exists(STATUS_FILE):
+                try:
+                    with open(STATUS_FILE, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    output_result({"ok": True, **data}, is_json)
+                    return 0
+                except Exception as e:
+                    output_result({"ok": False, "error": str(e)}, is_json)
+                    return 1
+            else:
+                output_result({"ok": False, "status": "idle", "message": "No active course running currently."}, is_json)
+                return 0
+
         elif args.command in ["list-courses", "courses"]:
             from xxt_agent.agent import XXTAgent
             with XXTAgent(config) as agent:
@@ -152,6 +218,14 @@ def main(argv: Optional[List[str]] = None) -> int:
                 agent.start()
                 chapters = agent._course_runner.get_chapters(args.course)
                 output_result({"ok": True, "course": args.course, "chapters": chapters}, is_json)
+            return 0
+
+        elif args.command == "tui" or (args.command == "run" and getattr(args, "tui", False)):
+            course = getattr(args, "course", "艺术鉴赏")
+            if getattr(args, "speed", None):
+                config.speed = args.speed
+            max_c = getattr(args, "max_chapters", 15)
+            run_tui_mode(course, config, max_chapters=max_c)
             return 0
 
         elif args.command == "run":
