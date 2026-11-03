@@ -70,6 +70,34 @@ class BrowserManager:
             return window._originalAppendChild.apply(this, arguments);
         };
     }
+
+    // Auto Play Video Blocker (reference project content.js reproduction)
+    window.addEventListener('mouseout', function(e) {
+        e.stopPropagation();
+        e.preventDefault();
+    }, true);
+
+    if (window.ananas && window.ananas.pause) {
+        window.ananas.pause = function () {
+            console.log('[xxt_agent] ananas pause blocked');
+        };
+    }
+
+    setInterval(function() {
+        var v = document.querySelector('video');
+        if (v) {
+            if (!v._pause_blocked) {
+                v._pause_blocked = true;
+                v.pause = function() {
+                    console.log('[xxt_agent] Video.pause blocked');
+                };
+            }
+            if (v.paused) {
+                v.muted = true;
+                v.play().catch(function(){});
+            }
+        }
+    }, 500);
     """
 
     @classmethod
@@ -118,6 +146,13 @@ class BrowserManager:
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
         options.add_experimental_option("useAutomationExtension", False)
 
+        ext_path = Path(__file__).parent / "extensions" / "chrome-extension.crx"
+        if ext_path.exists() and not headless:
+            try:
+                options.add_extension(str(ext_path))
+            except Exception as e:
+                logger.debug(f"Could not load chrome-extension.crx: {e}")
+
         service = EdgeService(executable_path=driver_path) if driver_path else EdgeService()
         driver = webdriver.Edge(service=service, options=options)
         cls._inject_cdp_scripts(driver)
@@ -137,6 +172,13 @@ class BrowserManager:
         options.add_argument(f"user-agent={cls.DEFAULT_USER_AGENT}")
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
         options.add_experimental_option("useAutomationExtension", False)
+
+        ext_path = Path(__file__).parent / "extensions" / "chrome-extension.crx"
+        if ext_path.exists() and not headless:
+            try:
+                options.add_extension(str(ext_path))
+            except Exception as e:
+                logger.debug(f"Could not load chrome-extension.crx: {e}")
 
         service = ChromeService(executable_path=driver_path) if driver_path else ChromeService()
         driver = webdriver.Chrome(service=service, options=options)

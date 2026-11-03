@@ -93,17 +93,32 @@ class VideoRunner:
 
         return completed_count
 
+    def _switch_to_video_frame(self, video_index: int = 0) -> bool:
+        """Reliably switches context into the video player iframe without stale references."""
+        try:
+            self.driver.switch_to.default_content()
+            self.driver.switch_to.frame("iframe")
+            v_iframes = self.driver.find_elements(By.CSS_SELECTOR, "iframe.ans-insertvideo-online, iframe[src*='video'], iframe")
+            target = v_iframes[video_index] if (v_iframes and video_index < len(v_iframes)) else (v_iframes[0] if v_iframes else None)
+            if target:
+                self.driver.switch_to.frame(target)
+                return True
+        except Exception as e:
+            logger.debug(f"Switch to video frame failed: {e}")
+        return False
+
     def _watch_single_video(self, vido_iframe, index: int, total: int) -> None:
         """Watches a single video until completed, handling pauses and popups."""
         logger.info(f"Starting playback for video {index}/{total}...")
         self._emit("video_start", {"index": index, "total": total})
 
-        self.driver.switch_to.frame(vido_iframe)
+        video_idx = index - 1
+        self._switch_to_video_frame(video_idx)
 
         # 1. Start playback
         self._trigger_play()
 
-        # 2. Mute audio and set playback rate
+        # 2. Mute audio and set playback rate with Auto-Play Blocker
         self._configure_playback()
 
         # 3. Fast-forward if pass_video enabled
@@ -128,13 +143,8 @@ class VideoRunner:
             except Exception:
                 pass
             finally:
-                # Restore video iframe context
-                try:
-                    self.driver.switch_to.default_content()
-                    self.driver.switch_to.frame("iframe")
-                    self.driver.switch_to.frame(vido_iframe)
-                except Exception:
-                    pass
+                # Restore video iframe context dynamically
+                self._switch_to_video_frame(video_idx)
 
             # Check in-video quiz
             self._check_and_solve_in_video_quiz()
@@ -147,7 +157,7 @@ class VideoRunner:
             duration_str = times.get("duration_text", "")
 
             # Check completion via parent job icon
-            if self._is_job_finished(vido_iframe, index - 1):
+            if self._is_job_finished(video_idx):
                 logger.info(f"Video {index}/{total} completed successfully")
                 self._emit("video_finished", {
                     "index": index,
@@ -226,10 +236,11 @@ class VideoRunner:
             pass
 
     def _configure_playback(self) -> None:
-        """Sets mute and requested playback rate, and injects anti-blur focus protection."""
+        """Sets mute, requested playback rate, and injects Auto-Play Blocker from reference project."""
         try:
             self.driver.execute_script(
                 """
+                // 1. Anti-blur & mouseout blocking (Auto Play Video Blocker from reference project)
                 window.onblur = null;
                 window.onfocus = null;
                 window.onmouseleave = null;
@@ -239,12 +250,37 @@ class VideoRunner:
                     Object.defineProperty(document, 'visibilityState', { get: function() { return 'visible'; }, configurable: true });
                 } catch(e){}
 
+                window.addEventListener('mouseout', function(e) {
+                    e.stopPropagation();
+                    e.preventDefault();
+                }, true);
+
+                if (window.ananas && window.ananas.pause) {
+                    window.ananas.pause = function() {};
+                }
+
+                // 2. Video element configuration & pause hijacking
                 var v = document.querySelector('video');
                 if (v) {
                     v.muted = true;
                     v.volume = 0;
                     if (arguments[0] && arguments[0] > 0) {
                         v.playbackRate = arguments[0];
+                    }
+                    // Override video.pause so clicking pause or window blur CANNOT pause it
+                    v._orig_pause = v.pause;
+                    v.pause = function() {
+                        console.log('[xxt_agent] Pause blocked by Auto-Play Blocker');
+                    };
+                    // 500ms auto-play heartbeat interval (reference project content.js)
+                    if (!window._auto_play_interval) {
+                        window._auto_play_interval = setInterval(function() {
+                            var vid = document.querySelector('video');
+                            if (vid && vid.paused) {
+                                vid.muted = true;
+                                vid.play().catch(function(){});
+                            }
+                        }, 500);
                     }
                 }
                 """,
@@ -290,11 +326,12 @@ class VideoRunner:
         except Exception:
             return {}
 
-    def _is_job_finished(self, vido_iframe, icon_index: int) -> bool:
-        """Switches briefly to parent iframe to check if task point icon shows finished, then restores video iframe."""
+    def _is_job_finished(self, icon_index: int) -> bool:
+        """Switches briefly to parent chapter iframe to check if task point icon shows finished."""
         is_finished = False
         try:
-            self.driver.switch_to.parent_frame()
+            self.driver.switch_to.default_content()
+            self.driver.switch_to.frame("iframe")
             icons = self.driver.find_elements(By.CLASS_NAME, "ans-job-icon-clear ")
             if 0 <= icon_index < len(icons):
                 icon = icons[icon_index]
@@ -305,10 +342,7 @@ class VideoRunner:
         except Exception:
             pass
         finally:
-            try:
-                self.driver.switch_to.frame(vido_iframe)
-            except Exception:
-                pass
+            self._switch_to_video_frame(icon_index)
         return is_finished
 
     def _check_and_solve_in_video_quiz(self) -> None:
