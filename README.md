@@ -55,11 +55,31 @@ python -m xxt_agent.cli chapters --course "艺术鉴赏" --json
 
 ### 4. 自动执行刷课 (可指定时长与倍速)
 ```bash
-# 刷【艺术鉴赏】课程 1 小时 (3600 秒)，2.0 倍速，无头静默运行
-python -m xxt_agent.cli run --course "艺术鉴赏" --duration 3600 --speed 2.0 --json
+# 刷【艺术鉴赏】课程，1.0 倍速，GUI 可视化窗口
+python -m xxt_agent.cli run --course "艺术鉴赏" --gui --speed 1.0
+
+# 启动终端动态仪表盘监控
+python -m xxt_agent.cli tui --course "艺术鉴赏"
 ```
 
-### 5. 调用 AI 题目求解器 (单题求解)
+### 5. 课程代办排队表 (多门课自动轮转与满额自动换课)
+当某门课达到今日观看时长上限（如 45/45 分钟）或任务点上限时，Agent 将自动安全关闭该课程，平滑切换至排队表中的下一门课：
+```bash
+# 执行排队表刷课
+python -m xxt_agent.cli queue run --courses "艺术鉴赏" "音乐鉴赏" "大学生心理健康教育" --gui
+
+# 查看/管理已配置的默认代办排队表
+python -m xxt_agent.cli queue list
+python -m xxt_agent.cli queue set --courses "艺术鉴赏" "音乐鉴赏"
+```
+
+### 6. 开箱即用配置向导 (Wizard)
+首次使用或重新配置时，一键启动交互式引导，询问账号、AI 答题、排队课程及模式：
+```bash
+python -m xxt_agent.cli wizard
+```
+
+### 7. 调用 AI 题目求解器 (单题求解)
 ```bash
 python -m xxt_agent.cli solve --question "以下哪部作品是达芬奇的代表作？" --type "单选题" --options "A:《蒙娜丽莎》" "B:《星月夜》" "C:《向日葵》" --json
 ```

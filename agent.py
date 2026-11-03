@@ -99,6 +99,75 @@ class XXTAgent:
         self.start()
         return self._course_runner.run_course(course_name, max_chapters=max_chapters)
 
+    def run_queue(
+        self,
+        courses: List[str],
+        max_chapters_per_course: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Executes queue progression over multiple courses, automatically switching on daily limits."""
+        self.start()
+        total_courses = len(courses)
+        logger.info(f"Starting multi-course queue with {total_courses} course(s): {courses}")
+        self.event_callback(RunEvent(event_type="queue_start", data={"courses": courses, "total": total_courses}))
+
+        results: Dict[str, Any] = {
+            "total_courses": total_courses,
+            "courses_processed": 0,
+            "course_summaries": {},
+            "statuses": {},
+        }
+
+        for idx, course_name in enumerate(courses):
+            logger.info(f"=== Queue [{idx + 1}/{total_courses}]: Starting course '{course_name}' ===")
+            self.event_callback(RunEvent(
+                event_type="queue_course_start",
+                data={"course": course_name, "index": idx + 1, "total": total_courses}
+            ))
+
+            summary = self._course_runner.run_course(course_name, max_chapters=max_chapters_per_course)
+            results["course_summaries"][course_name] = summary.to_dict()
+            results["courses_processed"] += 1
+
+            if summary.daily_limit_reached:
+                results["statuses"][course_name] = "daily_limit_reached"
+                logger.warning(
+                    f"Course '{course_name}' hit daily limit ({summary.daily_limit_reason}). "
+                    f"Automatically switching to next course in queue..."
+                )
+                self.event_callback(RunEvent(
+                    event_type="queue_course_switched",
+                    data={
+                        "course": course_name,
+                        "reason": summary.daily_limit_reason,
+                        "next_index": idx + 2 if idx + 1 < total_courses else None
+                    }
+                ))
+            elif summary.success:
+                results["statuses"][course_name] = "completed"
+                logger.info(f"Course '{course_name}' finished all pending tasks!")
+            else:
+                results["statuses"][course_name] = "error"
+                logger.warning(f"Course '{course_name}' finished with errors: {summary.errors}")
+
+            # Clean up extra windows/tabs and return to base space before next course
+            try:
+                if len(self.driver.window_handles) > 1:
+                    main_h = self.driver.window_handles[0]
+                    for h in list(self.driver.window_handles):
+                        if h != main_h:
+                            try:
+                                self.driver.switch_to.window(h)
+                                self.driver.close()
+                            except Exception:
+                                pass
+                    self.driver.switch_to.window(main_h)
+            except Exception as e:
+                logger.debug(f"Window cleanup error: {e}")
+
+        logger.info(f"Multi-course queue completed. Summary: {results['statuses']}")
+        self.event_callback(RunEvent(event_type="queue_complete", data=results))
+        return results
+
     def solve_question(
         self,
         question_title: str,

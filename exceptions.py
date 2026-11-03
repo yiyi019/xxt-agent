@@ -46,3 +46,12 @@ class BrowserError(XXTAgentError):
     """Raised when browser automation encounters fatal issue."""
     def __init__(self, message: str, details: dict = None):
         super().__init__(message, error_code="BROWSER_ERROR", details=details)
+
+
+class DailyLimitReachedError(XXTAgentError):
+    """Raised when daily watch duration or task point count limit is reached for a course."""
+    def __init__(self, course_name: str, message: str = "Daily limit reached", limit_type: str = "duration_or_tasks", details: dict = None):
+        super().__init__(f"Course '{course_name}' daily limit reached: {message}", error_code="DAILY_LIMIT_REACHED", details=details)
+        self.course_name = course_name
+        self.limit_type = limit_type
+

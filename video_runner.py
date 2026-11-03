@@ -9,6 +9,7 @@ from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.by import By
 
 from xxt_agent.ai_solver import DeepSeekSolver
+from xxt_agent.exceptions import DailyLimitReachedError
 from xxt_agent.face_bypass import FaceBypass
 from xxt_agent.font_decoder import FontDecoder
 from xxt_agent.models import RunEvent
@@ -88,10 +89,33 @@ class VideoRunner:
                 vido_iframe = parent.find_element(By.TAG_NAME, "iframe")
 
             self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", vido_iframe)
-            self._watch_single_video(vido_iframe, i + 1, total_videos)
+            self._watch_single_video(vido_iframe, i + 1, total_videos, course_name=course_name)
             completed_count += 1
 
         return completed_count
+
+    def check_daily_limit_popup(self) -> Optional[str]:
+        """Checks if the Chaoxing daily limit modal (.jobCountDiv) is displayed."""
+        try:
+            self.driver.switch_to.default_content()
+            popups = self.driver.find_elements(By.CSS_SELECTOR, ".jobCountDiv, .videoLimitTip, .jobLimitTip")
+            for p in popups:
+                if p.is_displayed():
+                    text = p.text.strip()
+                    logger.warning(f"Detected Chaoxing daily watch limit popup: {text}")
+                    # Click '知道了' or close modal
+                    try:
+                        btn = self.driver.find_element(By.CSS_SELECTOR, ".jobCountDiv div.popBottom a.jb_btn, .jobCountDiv .popClose")
+                        self.driver.execute_script("arguments[0].click();", btn)
+                    except Exception:
+                        try:
+                            self.driver.execute_script("if (typeof closeDeleteWindow === 'function') closeDeleteWindow();")
+                        except Exception:
+                            pass
+                    return text or "今日视频观看时长或任务点已达上限"
+        except Exception:
+            pass
+        return None
 
     def _switch_to_video_frame(self, video_index: int = 0) -> bool:
         """Reliably switches context into the video player iframe without stale references."""
@@ -107,10 +131,10 @@ class VideoRunner:
             logger.debug(f"Switch to video frame failed: {e}")
         return False
 
-    def _watch_single_video(self, vido_iframe, index: int, total: int) -> None:
-        """Watches a single video until completed, handling pauses and popups."""
+    def _watch_single_video(self, vido_iframe, index: int, total: int, course_name: str = "") -> None:
+        """Watches a single video until completed, handling pauses, daily limits, and popups."""
         logger.info(f"Starting playback for video {index}/{total}...")
-        self._emit("video_start", {"index": index, "total": total})
+        self._emit("video_start", {"index": index, "total": total, "course": course_name})
 
         video_idx = index - 1
         self._switch_to_video_frame(video_idx)
@@ -132,6 +156,13 @@ class VideoRunner:
 
         while True:
             time.sleep(1)
+
+            # Check daily limit popup (Image 2)
+            limit_msg = self.check_daily_limit_popup()
+            if limit_msg:
+                logger.warning(f"Course '{course_name}' reached daily watch limit: {limit_msg}")
+                self._emit("daily_limit_reached", {"course": course_name, "message": limit_msg, "video_index": index})
+                raise DailyLimitReachedError(course_name=course_name, message=limit_msg)
 
             # Check face popup in top-level document
             try:

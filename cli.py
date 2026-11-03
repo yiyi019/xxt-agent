@@ -7,6 +7,7 @@ import os
 import sys
 import json
 import time
+import re
 import argparse
 import threading
 import unicodedata
@@ -25,6 +26,7 @@ if sys.stderr and hasattr(sys.stderr, "reconfigure"):
 
 from xxt_agent.config import XXTConfig
 from xxt_agent.ai_solver import DeepSeekSolver
+from xxt_agent.wizard import run_interactive_wizard, check_and_prompt_if_unconfigured
 
 STATUS_FILE = r"D:\Xuexitong_shuake\live_status.json"
 
@@ -61,6 +63,8 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Output results strictly in JSON format.")
     common.add_argument("--format", choices=["json", "text"], default=argparse.SUPPRESS, help="Output format.")
     common.add_argument("--gui", action="store_true", default=argparse.SUPPRESS, help="Disable headless mode and show browser UI.")
+    common.add_argument("--headless", action="store_true", default=argparse.SUPPRESS, help="Run silently in the background.")
+    common.add_argument("--mode", choices=["gui", "headless", "tui"], default=argparse.SUPPRESS, help="Execution display mode.")
 
     parser = argparse.ArgumentParser(
         parents=[common],
@@ -68,6 +72,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
+
+    # Command: wizard / init / setup
+    subparsers.add_parser("wizard", parents=[common], help="Launch interactive out-of-the-box configuration wizard.")
+    subparsers.add_parser("init", parents=[common], help="Alias for wizard.")
+    subparsers.add_parser("setup", parents=[common], help="Alias for wizard.")
 
     # Command: status
     subparsers.add_parser("status", parents=[common], help="Check system readiness, driver, cookies, and AI keys.")
@@ -87,9 +96,19 @@ def build_parser() -> argparse.ArgumentParser:
     cap_parser = subparsers.add_parser("chapters", parents=[common], help="List chapters for a specific course.")
     cap_parser.add_argument("--course", "-c", required=True, help="Course title to inspect.")
 
+    # Command: queue
+    queue_parser = subparsers.add_parser("queue", parents=[common], help="Manage and execute multi-course automated queue.")
+    queue_parser.add_argument("queue_action", nargs="?", default="run", choices=["run", "list", "show", "set", "add", "clear"], help="Queue action.")
+    queue_parser.add_argument("--courses", "-c", nargs="*", help="Course titles for queue.")
+    queue_parser.add_argument("--speed", "-s", type=float, default=1.0, help="Playback speed (default: 1.0).")
+    queue_parser.add_argument("--max-chapters", "-m", type=int, default=15, help="Maximum number of chapters per course.")
+    queue_parser.add_argument("--tui", action="store_true", help="Launch interactive Terminal UI (TUI) dashboard.")
+
     # Command: run
-    run_parser = subparsers.add_parser("run", parents=[common], help="Run automated study on a specified course.")
+    run_parser = subparsers.add_parser("run", parents=[common], help="Run automated study on a specified course or queue.")
     run_parser.add_argument("--course", "-c", default=None, help="Course title to run (default: from config).")
+    run_parser.add_argument("--courses", nargs="*", default=None, help="Multiple course titles to run sequentially.")
+    run_parser.add_argument("--queue", action="store_true", help="Run the full queued courses from configuration.")
     run_parser.add_argument("--duration", "-d", type=int, default=3600, help="Maximum run duration in seconds (default: 3600).")
     run_parser.add_argument("--speed", "-s", type=float, default=1.0, help="Playback speed (e.g. 1.0, 2.0).")
     run_parser.add_argument("--max-chapters", "-m", type=int, default=15, help="Maximum number of chapters to process.")
@@ -97,9 +116,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Command: tui
     tui_parser = subparsers.add_parser("tui", parents=[common], help="Launch interactive Terminal UI (TUI) dashboard.")
-    tui_parser.add_argument("--course", "-c", default="艺术鉴赏", help="Course title to run (default: 艺术鉴赏).")
+    tui_parser.add_argument("--course", "-c", default=None, help="Course title to run (default: from config).")
+    tui_parser.add_argument("--courses", nargs="*", default=None, help="Multiple course titles for queue.")
+    tui_parser.add_argument("--queue", action="store_true", help="Run configured course queue in TUI.")
     tui_parser.add_argument("--speed", "-s", type=float, default=1.0, help="Playback speed (default: 1.0).")
-    tui_parser.add_argument("--max-chapters", "-m", type=int, default=15, help="Maximum chapters (default: 15).")
+    tui_parser.add_argument("--max-chapters", "-m", type=int, default=15, help="Maximum chapters per course (default: 15).")
 
     # Command: solve
     solve_parser = subparsers.add_parser("solve", parents=[common], help="Directly solve a question via DeepSeek AI.")
@@ -112,18 +133,29 @@ def build_parser() -> argparse.ArgumentParser:
 
     return parser
 
-def run_tui_mode(course_name: str, config: XXTConfig, max_chapters: int = 15):
+def run_tui_mode(courses: Any, config: XXTConfig, max_chapters: int = 15):
     from rich.live import Live
     from xxt_agent.tui import AgentTUI
     from xxt_agent.agent import XXTAgent
 
-    tui = AgentTUI(course_name, config)
+    if isinstance(courses, str):
+        course_list = [courses]
+    else:
+        course_list = [c for c in courses if c and c.strip()]
+    if not course_list:
+        course_list = config.default_courses or ["艺术鉴赏"]
+
+    first_course = course_list[0]
+    tui = AgentTUI(first_course, config)
     agent = XXTAgent(config, event_callback=tui.handle_event)
 
     def worker():
         try:
             with agent:
-                agent.run_course(course_name, max_chapters=max_chapters)
+                if len(course_list) > 1:
+                    agent.run_queue(course_list, max_chapters_per_course=max_chapters)
+                else:
+                    agent.run_course(first_course, max_chapters=max_chapters)
         except Exception as e:
             tui.add_event("运行异常", "bold red", str(e))
         finally:
@@ -142,10 +174,10 @@ def run_tui_mode(course_name: str, config: XXTConfig, max_chapters: int = 15):
                 time.sleep(2)
         else:
             # Fallback for redirected streams / non-TTY
-            print(f"[TUI Headless Mode Started] Course: {course_name} | Max Chapters: {max_chapters}", flush=True)
+            print(f"[TUI Mode Started] Courses: {course_list} | Max Chapters: {max_chapters}", flush=True)
             while th.is_alive():
                 time.sleep(1)
-            print("[TUI Headless Mode Finished]", flush=True)
+            print("[TUI Mode Finished]", flush=True)
     except KeyboardInterrupt:
         tui.add_event("用户中断", "bold yellow", "收到退出指令，正在关闭后台浏览器...")
         agent.close()
@@ -165,10 +197,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         is_json = True
 
     config = XXTConfig.load()
-    if getattr(args, "gui", False):
+    if getattr(args, "mode", None) == "gui" or getattr(args, "gui", False):
         config.headless = False
+    elif getattr(args, "mode", None) == "headless" or getattr(args, "headless", False):
+        config.headless = True
 
     try:
+        if args.command in ["wizard", "init", "setup"]:
+            run_interactive_wizard(config)
+            return 0
+
+        # Auto-prompt unconfigured credentials for user commands
+        if args.command in ["run", "tui", "queue", "chapters", "list-courses", "courses"]:
+            if not config.phone_number or not config.password:
+                config = check_and_prompt_if_unconfigured(config)
+
         if args.command == "config":
             output_result(config.to_dict(), is_json)
             return 0
@@ -220,31 +263,124 @@ def main(argv: Optional[List[str]] = None) -> int:
                 output_result({"ok": True, "course": args.course, "chapters": chapters}, is_json)
             return 0
 
-        elif args.command == "tui" or (args.command == "run" and getattr(args, "tui", False)):
-            course = getattr(args, "course", None)
-            if not course or not course.strip() or "\ufffd" in course or "?" in course:
-                course = config.default_courses[0] if config.default_courses else "艺术鉴赏"
+        elif args.command == "queue":
+            action = getattr(args, "queue_action", "run")
+            if action in ["list", "show"]:
+                output_result({"ok": True, "queue": config.default_courses}, is_json)
+                return 0
+            elif action == "set":
+                courses_in = []
+                if getattr(args, "courses", None):
+                    for c in args.courses:
+                        courses_in.extend([x.strip() for x in re.split(r"[,;，；\s]+", c) if x.strip()])
+                config.default_courses = courses_in
+                config.save()
+                output_result({"ok": True, "message": f"Queue updated to: {courses_in}", "queue": courses_in}, is_json)
+                return 0
+            elif action == "add":
+                courses_in = []
+                if getattr(args, "courses", None):
+                    for c in args.courses:
+                        courses_in.extend([x.strip() for x in re.split(r"[,;，；\s]+", c) if x.strip()])
+                current_q = list(config.default_courses)
+                for c in courses_in:
+                    if c not in current_q:
+                        current_q.append(c)
+                config.default_courses = current_q
+                config.save()
+                output_result({"ok": True, "message": f"Added courses. New queue: {current_q}", "queue": current_q}, is_json)
+                return 0
+            elif action == "clear":
+                config.default_courses = []
+                config.save()
+                output_result({"ok": True, "message": "Queue cleared.", "queue": []}, is_json)
+                return 0
+            elif action == "run":
+                target_courses = []
+                if getattr(args, "courses", None):
+                    for c in args.courses:
+                        target_courses.extend([x.strip() for x in re.split(r"[,;，；\s]+", c) if x.strip()])
+                if not target_courses:
+                    target_courses = config.default_courses or ["艺术鉴赏"]
+
+                target_courses = [c for c in target_courses if c and "\ufffd" not in c and "?" not in c]
+                if getattr(args, "speed", None):
+                    config.speed = args.speed
+                max_c = getattr(args, "max_chapters", 15)
+
+                is_tui = getattr(args, "tui", False) or getattr(args, "mode", None) == "tui"
+                if is_tui:
+                    run_tui_mode(target_courses, config, max_chapters=max_c)
+                    return 0
+
+                from xxt_agent.agent import XXTAgent
+                from xxt_agent.tui import AgentTUI
+                first_c = target_courses[0] if target_courses else "艺术鉴赏"
+                tui = AgentTUI(first_c, config)
+                with XXTAgent(config, event_callback=tui.handle_event) as agent:
+                    res = agent.run_queue(target_courses, max_chapters_per_course=max_c)
+                    output_result(res, is_json)
+                return 0
+
+        elif args.command == "tui":
+            target_courses = []
+            if getattr(args, "courses", None):
+                for c in args.courses:
+                    target_courses.extend([x.strip() for x in re.split(r"[,;，；]+", c) if x.strip()])
+            elif getattr(args, "course", None):
+                target_courses = [x.strip() for x in re.split(r"[,;，；]+", args.course) if x.strip()]
+            elif getattr(args, "queue", False):
+                target_courses = config.default_courses
+            else:
+                target_courses = config.default_courses or ["艺术鉴赏"]
+
+            target_courses = [c for c in target_courses if c and "\ufffd" not in c and "?" not in c]
+            if not target_courses:
+                target_courses = ["艺术鉴赏"]
+
             if getattr(args, "speed", None):
                 config.speed = args.speed
             max_c = getattr(args, "max_chapters", 15)
-            run_tui_mode(course, config, max_chapters=max_c)
+            run_tui_mode(target_courses, config, max_chapters=max_c)
             return 0
 
         elif args.command == "run":
             from xxt_agent.agent import XXTAgent
             from xxt_agent.tui import AgentTUI
-            course = getattr(args, "course", None)
-            if not course or not course.strip() or "\ufffd" in course or "?" in course:
-                course = config.default_courses[0] if config.default_courses else "艺术鉴赏"
+
+            target_courses = []
+            if getattr(args, "courses", None):
+                for c in args.courses:
+                    target_courses.extend([x.strip() for x in re.split(r"[,;，；]+", c) if x.strip()])
+            elif getattr(args, "course", None):
+                target_courses = [x.strip() for x in re.split(r"[,;，；]+", args.course) if x.strip()]
+            elif getattr(args, "queue", False):
+                target_courses = config.default_courses
+            else:
+                target_courses = config.default_courses or ["艺术鉴赏"]
+
+            target_courses = [c for c in target_courses if c and "\ufffd" not in c and "?" not in c]
+            if not target_courses:
+                target_courses = ["艺术鉴赏"]
+
             if getattr(args, "speed", None):
                 config.speed = args.speed
-            tui = AgentTUI(course, config)
+            max_c = getattr(args, "max_chapters", 15)
+
+            is_tui = getattr(args, "tui", False) or getattr(args, "mode", None) == "tui"
+            if is_tui:
+                run_tui_mode(target_courses, config, max_chapters=max_c)
+                return 0
+
+            first_c = target_courses[0]
+            tui = AgentTUI(first_c, config)
             with XXTAgent(config, event_callback=tui.handle_event) as agent:
-                res = agent.run_course(
-                    course_name=course,
-                    max_chapters=args.max_chapters
-                )
-                output_result(res.to_dict() if hasattr(res, "to_dict") else res, is_json)
+                if len(target_courses) > 1:
+                    res = agent.run_queue(target_courses, max_chapters_per_course=max_c)
+                    output_result(res, is_json)
+                else:
+                    res = agent.run_course(course_name=first_c, max_chapters=max_c)
+                    output_result(res.to_dict() if hasattr(res, "to_dict") else res, is_json)
             return 0
 
         elif args.command == "solve":

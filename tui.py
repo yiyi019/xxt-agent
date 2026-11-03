@@ -134,6 +134,30 @@ class AgentTUI:
             self.chapters_completed = edata.get("chapter_index", self.chapters_completed + 1)
             self.add_event("章节达成", "bold green", f"第 {self.chapters_completed} 节全部任务已完成，准备进入下一节")
 
+        elif etype == "daily_limit_reached":
+            c_name = edata.get("course") or self.course_name
+            reason = edata.get("reason") or "今日观看时长或任务点已达上限"
+            self.status_text = f"【{c_name}】{reason}，已自动停止"
+            self.add_event("上限拦截", "bold yellow", f"【{c_name}】{reason}！已自动关闭本门课程")
+
+        elif etype == "queue_start":
+            courses = edata.get("courses", [])
+            self.add_event("队列启动", "bold magenta", f"启动课程代办排队表: 共 {len(courses)} 门课程 {courses}")
+
+        elif etype == "queue_course_start":
+            self.course_name = edata.get("course", self.course_name)
+            self.chapters_completed = 0
+            self.add_event("课程切换", "bold cyan", f"开始执行队列第 {edata.get('index')}/{edata.get('total')} 门: 【{self.course_name}】")
+
+        elif etype == "queue_course_switched":
+            c_name = edata.get("course", self.course_name)
+            self.add_event("自动换课", "bold yellow", f"【{c_name}】今日上限已满，已自动平滑切换至下一门代办课程！")
+
+        elif etype == "queue_complete":
+            self.status_text = "课程代办排队表全部执行完成！"
+            statuses = edata.get("statuses", {})
+            self.add_event("代办圆满", "bold green", f"所有排队课程均已完成或达上限: {statuses}")
+
         elif etype == "course_run_complete":
             self.status_text = "课程指定目标已圆满完成！"
             self.add_event("任务圆满", "bold magenta", "所有目标章节均已刷完！")
@@ -153,6 +177,7 @@ class AgentTUI:
 
         phone = self.config.phone_number
         masked_phone = f"{phone[:3]}****{phone[-4:]}" if len(phone) >= 11 else (phone or "免密Cookie")
+        mode_disp = "[yellow]GUI (前台可视化)[/yellow]" if not self.config.headless else "[green]Headless (静默后台)[/green]"
 
         table.add_row(
             f"课程: [white]{self.course_name}[/white]",
@@ -166,7 +191,7 @@ class AgentTUI:
         )
         table.add_row(
             f"状态: [white]{self.status_text}[/white]",
-            f"浏览器模式: [green]Headless (静默后台)[/green]",
+            f"浏览器模式: {mode_disp}",
             f"运行耗时: [white]{elapsed_str}[/white]"
         )
         return table

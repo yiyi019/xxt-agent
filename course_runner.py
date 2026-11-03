@@ -17,7 +17,7 @@ from selenium.webdriver.common.by import By
 from xxt_agent.ai_solver import DeepSeekSolver
 from xxt_agent.config import XXTConfig
 from xxt_agent.content_handlers import AudioHandler, DiscussionHandler, PPTHandler, ReadingHandler
-from xxt_agent.exceptions import CourseNotFoundError
+from xxt_agent.exceptions import CourseNotFoundError, DailyLimitReachedError
 from xxt_agent.face_bypass import FaceBypass
 from xxt_agent.font_decoder import FontDecoder
 from xxt_agent.models import CourseInfo, CourseRunSummary, RunEvent
@@ -272,6 +272,66 @@ class CourseRunner:
         time.sleep(2)
         return True
 
+    def check_course_daily_limits(self) -> dict:
+        """Inspects course chapter catalog page for daily watch duration and mission point limits."""
+        res = {
+            "has_limit": False,
+            "limit_reached": False,
+            "duration_cur": 0,
+            "duration_max": 0,
+            "tasks_cur": 0,
+            "tasks_max": 0,
+            "reason": ""
+        }
+        try:
+            self.driver.switch_to.default_content()
+            frames = self.driver.find_elements(By.TAG_NAME, "iframe")
+            target_frame = None
+            for f in frames:
+                fid = f.get_attribute("id") or ""
+                fname = f.get_attribute("name") or ""
+                if "frame_content-zj" in fid or "frame_content-zj" in fname:
+                    target_frame = f
+                    break
+
+            if target_frame:
+                self.driver.switch_to.frame(target_frame)
+
+            text = self.driver.execute_script("return (document.body && document.body.innerText) ? document.body.innerText : '';")
+            self.driver.switch_to.default_content()
+
+            # 1. Match: 今日已观看视频时长（分钟）: 45/45
+            dur_match = re.search(r"今日已观看视频时长[^\d]*(\d+)\s*/\s*(\d+)", text)
+            if dur_match:
+                cur_d, max_d = int(dur_match.group(1)), int(dur_match.group(2))
+                res["has_limit"] = True
+                res["duration_cur"] = cur_d
+                res["duration_max"] = max_d
+                if max_d > 0 and cur_d >= max_d:
+                    res["limit_reached"] = True
+                    res["reason"] = f"今日已观看视频时长达上限 ({cur_d}/{max_d}分钟)"
+
+            # 2. Match: 今日可完成视频任务点: 2/5
+            task_match = re.search(r"今日可完成视频任务点[^\d]*(\d+)\s*/\s*(\d+)", text)
+            if task_match:
+                cur_t, max_t = int(task_match.group(1)), int(task_match.group(2))
+                res["has_limit"] = True
+                res["tasks_cur"] = cur_t
+                res["tasks_max"] = max_t
+                if max_t > 0 and cur_t >= max_t:
+                    res["limit_reached"] = True
+                    if not res["reason"]:
+                        res["reason"] = f"今日视频任务点已达上限 ({cur_t}/{max_t})"
+
+        except Exception as e:
+            logger.debug(f"Error checking daily limits: {e}")
+            try:
+                self.driver.switch_to.default_content()
+            except Exception:
+                pass
+
+        return res
+
     def run_course(self, course_name: str, max_chapters: Optional[int] = None) -> CourseRunSummary:
         """Runs automated progression through course chapters."""
         start_time = datetime.datetime.now().isoformat()
@@ -286,6 +346,19 @@ class CourseRunner:
 
         try:
             self.select_course(course_name)
+
+            # Check if course has already hit daily limits on catalog page (Image 1)
+            limits = self.check_course_daily_limits()
+            if limits.get("limit_reached"):
+                reason = limits.get("reason", "今日观看时长或任务点已达上限")
+                logger.warning(f"Course '{course_name}' has reached today's limit: {reason}")
+                summary.daily_limit_reached = True
+                summary.daily_limit_reason = reason
+                summary.end_time = datetime.datetime.now().isoformat()
+                self._emit(RunEvent(event_type="daily_limit_reached", data={"course": course_name, "reason": reason}))
+                self._emit(RunEvent(event_type="course_run_complete", data=summary.to_dict()))
+                return summary
+
             has_mission = self.find_and_enter_mission_point(course_name)
             if not has_mission:
                 logger.info(f"Course '{course_name}' has no pending missions; already complete!")
@@ -303,7 +376,16 @@ class CourseRunner:
                     logger.info("Face verification popup present; executing bypass...")
                     self.face_bypass.bypass()
 
-                # 2. Process tasks on current chapter page
+                # 2. Daily limit modal check (Image 2) on student study page
+                limit_popup = self.video_runner.check_daily_limit_popup()
+                if limit_popup:
+                    logger.warning(f"Daily watch limit reached for '{course_name}': {limit_popup}")
+                    summary.daily_limit_reached = True
+                    summary.daily_limit_reason = limit_popup
+                    self._emit(RunEvent(event_type="daily_limit_reached", data={"course": course_name, "reason": limit_popup}))
+                    break
+
+                # 3. Process tasks on current chapter page
                 self._fold_sidebar()
                 chapter_title = self._get_current_chapter_title()
                 logger.info(f"--- Processing Chapter {chapters_done + 1}: {chapter_title} ---")
@@ -360,7 +442,7 @@ class CourseRunner:
                     logger.info(f"Reached max requested chapters ({max_chapters}); stopping")
                     break
 
-                # 3. Advance to next page
+                # 4. Advance to next page
                 self.driver.switch_to.default_content()
                 has_next = self._click_next_page()
                 if not has_next:
@@ -369,6 +451,11 @@ class CourseRunner:
 
                 time.sleep(2)
 
+        except DailyLimitReachedError as dle:
+            logger.warning(f"Daily watch limit reached during execution: {dle.message}")
+            summary.daily_limit_reached = True
+            summary.daily_limit_reason = dle.message
+            self._emit(RunEvent(event_type="daily_limit_reached", data={"course": course_name, "reason": dle.message}))
         except Exception as e:
             logger.error(f"Course run encountered error: {e}", exc_info=True)
             summary.errors.append(str(e))

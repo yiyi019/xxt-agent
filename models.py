@@ -102,6 +102,8 @@ class CourseRunSummary:
     ppt_completed: int = 0
     reading_completed: int = 0
     audio_completed: int = 0
+    daily_limit_reached: bool = False
+    daily_limit_reason: str = ""
     errors: List[str] = field(default_factory=list)
     success: bool = True
 
