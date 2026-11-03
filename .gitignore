@@ -8,8 +8,11 @@ build/
 
 # User credentials and session state (KEEP PRIVATE)
 config.json
-data/*.pkl
-data/cookies.pkl
+**/config.json
+*.pkl
+**/*.pkl
+**/data/cookies.pkl
+**/data/debug/
 *.pid
 *.log
 

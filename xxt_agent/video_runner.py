@@ -95,26 +95,67 @@ class VideoRunner:
         return completed_count
 
     def check_daily_limit_popup(self) -> Optional[str]:
-        """Checks if the Chaoxing daily limit modal (.jobCountDiv) is displayed."""
-        try:
-            self.driver.switch_to.default_content()
-            popups = self.driver.find_elements(By.CSS_SELECTOR, ".jobCountDiv, .videoLimitTip, .jobLimitTip")
-            for p in popups:
-                if p.is_displayed():
-                    text = p.text.strip()
-                    logger.warning(f"Detected Chaoxing daily watch limit popup: {text}")
-                    # Click '知道了' or close modal
-                    try:
-                        btn = self.driver.find_element(By.CSS_SELECTOR, ".jobCountDiv div.popBottom a.jb_btn, .jobCountDiv .popClose")
-                        self.driver.execute_script("arguments[0].click();", btn)
-                    except Exception:
+        """Checks if Chaoxing daily watch limit modal (Image 2) is displayed in current or top context."""
+        def _scan_and_dismiss() -> Optional[str]:
+            # 1. Broad text search for limit prompt (Image 2)
+            try:
+                xpath = "//*[contains(text(), '今日视频观看时长已达上限') or contains(text(), '观看时长已达上限') or contains(text(), '无法完成任务点')]"
+                matches = self.driver.find_elements(By.XPATH, xpath)
+                for m in matches:
+                    if m.is_displayed():
+                        text = m.text.strip()
+                        logger.warning(f"Detected Chaoxing daily watch limit modal: {text}")
+                        # Try to find and click '知道了' or close button
                         try:
-                            self.driver.execute_script("if (typeof closeDeleteWindow === 'function') closeDeleteWindow();")
+                            btn_xpath = "//button[contains(text(), '知道了')] | //a[contains(text(), '知道了')] | //span[contains(text(), '知道了')] | //div[contains(text(), '知道了')]"
+                            btns = self.driver.find_elements(By.XPATH, btn_xpath)
+                            for b in btns:
+                                if b.is_displayed():
+                                    self.driver.execute_script("arguments[0].click();", b)
+                                    break
                         except Exception:
                             pass
-                    return text or "今日视频观看时长或任务点已达上限"
+                        return text or "今日视频观看时长已达上限，您可继续观看视频，但无法完成任务点"
+            except Exception:
+                pass
+
+            # 2. Legacy CSS class check
+            try:
+                popups = self.driver.find_elements(By.CSS_SELECTOR, ".jobCountDiv, .videoLimitTip, .jobLimitTip")
+                for p in popups:
+                    if p.is_displayed():
+                        text = p.text.strip()
+                        logger.warning(f"Detected Chaoxing daily watch limit popup: {text}")
+                        try:
+                            btn = self.driver.find_element(By.CSS_SELECTOR, ".jobCountDiv div.popBottom a.jb_btn, .jobCountDiv .popClose")
+                            self.driver.execute_script("arguments[0].click();", btn)
+                        except Exception:
+                            try:
+                                self.driver.execute_script("if (typeof closeDeleteWindow === 'function') closeDeleteWindow();")
+                            except Exception:
+                                pass
+                        return text or "今日视频观看时长或任务点已达上限"
+            except Exception:
+                pass
+            return None
+
+        # Check default content first
+        try:
+            self.driver.switch_to.default_content()
+            found = _scan_and_dismiss()
+            if found:
+                return found
         except Exception:
             pass
+
+        # Also check inside current active iframe
+        try:
+            found = _scan_and_dismiss()
+            if found:
+                return found
+        except Exception:
+            pass
+
         return None
 
     def _switch_to_video_frame(self, video_index: int = 0) -> bool:

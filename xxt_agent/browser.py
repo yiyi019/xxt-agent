@@ -142,9 +142,18 @@ class BrowserManager:
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--window-size=1920,1080")
         options.add_argument("--disable-blink-features=AutomationControlled")
+        options.add_argument("--no-zygote")
+        options.add_argument("--disable-breakpad")
+        options.add_argument("--disable-crash-reporter")
         options.add_argument(f"user-agent={cls.DEFAULT_USER_AGENT}")
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
         options.add_experimental_option("useAutomationExtension", False)
+
+        if os.environ.get("XXT_EDGE_BINARY"):
+            options.binary_location = os.environ["XXT_EDGE_BINARY"]
+        proxy = os.environ.get("XXT_PROXY") or os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
+        if proxy:
+            options.add_argument(f"--proxy-server={proxy}")
 
         ext_path = Path(__file__).parent / "extensions" / "chrome-extension.crx"
         if ext_path.exists() and not headless:
@@ -169,9 +178,18 @@ class BrowserManager:
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--window-size=1920,1080")
         options.add_argument("--disable-blink-features=AutomationControlled")
+        options.add_argument("--no-zygote")
+        options.add_argument("--disable-breakpad")
+        options.add_argument("--disable-crash-reporter")
         options.add_argument(f"user-agent={cls.DEFAULT_USER_AGENT}")
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
         options.add_experimental_option("useAutomationExtension", False)
+
+        if os.environ.get("XXT_CHROME_BINARY"):
+            options.binary_location = os.environ["XXT_CHROME_BINARY"]
+        proxy = os.environ.get("XXT_PROXY") or os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
+        if proxy:
+            options.add_argument(f"--proxy-server={proxy}")
 
         ext_path = Path(__file__).parent / "extensions" / "chrome-extension.crx"
         if ext_path.exists() and not headless:

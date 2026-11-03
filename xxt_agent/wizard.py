@@ -31,7 +31,8 @@ def is_configured(config: XXTConfig) -> bool:
 def prompt_input(prompt_text: str, default: Optional[str] = None, is_password: bool = False) -> str:
     """Helper to prompt user input with defaults in terminal."""
     if default:
-        suffix = f" [默认: {default}]: "
+        display_default = "****** (回车保留)" if is_password else default
+        suffix = f" [默认: {display_default}]: "
     else:
         suffix = ": "
 
@@ -74,7 +75,7 @@ def run_interactive_wizard(config: Optional[XXTConfig] = None) -> XXTConfig:
     # 1. 登录凭据
     print("【第一步：学习通账号与登录方式】")
     phone = prompt_input("1. 学习通绑定手机号", default=config.phone_number)
-    pwd = prompt_input("2. 学习通登录密码", default=config.password, is_password=False)
+    pwd = prompt_input("2. 学习通登录密码", default=config.password, is_password=True)
     browser = prompt_input("3. 浏览器内核 (edge / chrome)", default=config.browser or "edge").lower()
     if browser not in ["edge", "chrome"]:
         browser = "edge"

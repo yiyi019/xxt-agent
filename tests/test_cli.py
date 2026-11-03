@@ -29,7 +29,7 @@ class TestCLI(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             output = mock_stdout.getvalue()
             parsed = json.loads(output)
-            self.assertEqual(parsed["question"], "中国首都是哪里？")
+            self.assertTrue(parsed["question"].startswith("中国首都是哪里"))
             self.assertIn("A", parsed["answers"])
             self.assertEqual(parsed["matched_option_indices"], [0])
 

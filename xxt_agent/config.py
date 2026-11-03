@@ -49,6 +49,8 @@ class XXTConfig:
     def load(cls, path: Optional[Path] = None) -> "XXTConfig":
         """Loads configuration from specified path, default path, or imports from legacy."""
         target_path = Path(path) if path else DEFAULT_CONFIG_PATH
+        if not target_path.exists() and (Path(__file__).resolve().parent.parent / "config.json").exists():
+            target_path = Path(__file__).resolve().parent.parent / "config.json"
 
         if target_path.exists():
             try:

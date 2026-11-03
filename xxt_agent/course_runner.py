@@ -3,8 +3,10 @@
 
 import datetime
 import logging
+import os
 import re
 import time
+from pathlib import Path
 from typing import Callable, List, Optional
 
 from selenium.common.exceptions import (
@@ -84,31 +86,85 @@ class CourseRunner:
         except Exception as e:
             logger.debug(f"Event emission error: {e}")
 
-    def list_courses(self) -> List[CourseInfo]:
-        """Fetches the list of active courses available in the user account."""
-        self.session_manager.ensure_authenticated()
-        self.driver.get("https://i.chaoxing.com/")
-        time.sleep(2)
+    def _dump_debug_state(self, prefix: str = "debug") -> None:
+        """Helper to dump current page HTML and screenshot to data/debug/ for troubleshooting."""
+        try:
+            debug_dir = Path(__file__).resolve().parent / "data" / "debug"
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            html_path = debug_dir / f"{prefix}_{ts}.html"
+            png_path = debug_dir / f"{prefix}_{ts}.png"
+            with open(html_path, "w", encoding="utf-8") as f:
+                f.write(self.driver.page_source)
+            self.driver.save_screenshot(str(png_path))
+            logger.warning(f"Dumped debug DOM snapshot: {html_path} and screenshot: {png_path}")
+        except Exception as e:
+            logger.debug(f"Failed to dump debug state: {e}")
 
-        # Navigate to Courses tab
-        self._navigate_to_course_list_tab()
+    def list_courses(self) -> List[CourseInfo]:
+        """Fetches the complete list of courses (MOOC/Erya/general & regular) under current account."""
+        self.session_manager.ensure_authenticated()
 
         courses: List[CourseInfo] = []
+        seen_titles = set()
+
+        # 1. Primary: Visit interaction hub (covers all Erya, MOOC, and general education courses)
+        primary_url = os.environ.get("XXT_COURSE_URL", "https://mooc1.chaoxing.com/visit/interaction")
         try:
-            course_elements = self.driver.find_elements(By.CLASS_NAME, "course-name")
-            if not course_elements:
-                course_elements = self.driver.find_elements(By.CLASS_NAME, "courseName")
-            if not course_elements:
-                course_elements = self.driver.find_elements(By.CSS_SELECTOR, '[class*="w_cour_txtH"]')
+            logger.info(f"Fetching courses from primary portal: {primary_url}")
+            self.driver.get(primary_url)
+            time.sleep(2.5)
+
+            course_selectors = [
+                "span.course-name",
+                "h3.course-name",
+                ".course-name.overHidden2",
+                ".course-name",
+                ".courseName",
+                "[class*='course-name']",
+                "[class*='w_cour_txtH']",
+            ]
+            course_elements = []
+            for sel in course_selectors:
+                els = self.driver.find_elements(By.CSS_SELECTOR, sel)
+                if els:
+                    course_elements = els
+                    break
 
             for el in course_elements:
                 title = el.get_attribute("title") or el.text.strip()
-                if title:
+                if title and title not in seen_titles:
+                    seen_titles.add(title)
                     courses.append(CourseInfo(name=title))
 
-            logger.info(f"Found {len(courses)} course(s)")
+            logger.info(f"Found {len(courses)} course(s) on primary interaction portal")
         except Exception as e:
-            logger.error(f"Error reading course list: {e}")
+            logger.warning(f"Error fetching from primary interaction portal: {e}")
+
+        # 2. Fallback: If 0 courses found, try i.chaoxing.com
+        if not courses:
+            try:
+                logger.info("Primary portal returned 0 courses; falling back to i.chaoxing.com...")
+                self.driver.get("https://i.chaoxing.com/")
+                time.sleep(2)
+                self._navigate_to_course_list_tab()
+
+                fallback_selectors = [
+                    (By.CLASS_NAME, "course-name"),
+                    (By.CLASS_NAME, "courseName"),
+                    (By.CSS_SELECTOR, '[class*="w_cour_txtH"]')
+                ]
+                for by_type, sel in fallback_selectors:
+                    els = self.driver.find_elements(by_type, sel)
+                    for el in els:
+                        title = el.get_attribute("title") or el.text.strip()
+                        if title and title not in seen_titles:
+                            seen_titles.add(title)
+                            courses.append(CourseInfo(name=title))
+                    if courses:
+                        break
+            except Exception as e:
+                logger.error(f"Error reading fallback course list: {e}")
 
         return courses
 
@@ -134,42 +190,112 @@ class CourseRunner:
             pass
 
     def select_course(self, course_name: str) -> bool:
-        """Finds and clicks into a specified course by name."""
+        """Finds, clicks into, and navigates to the specified course page, bypassing face checkpoints."""
         self.session_manager.ensure_authenticated()
-        self.driver.get("https://i.chaoxing.com/")
-        time.sleep(2)
-        self._navigate_to_course_list_tab()
-
-        course_elements = self.driver.find_elements(By.CLASS_NAME, "course-name")
-        if not course_elements:
-            course_elements = self.driver.find_elements(By.CLASS_NAME, "courseName")
-        if not course_elements:
-            course_elements = self.driver.find_elements(By.CSS_SELECTOR, '[class*="w_cour_txtH"]')
 
         orig_handles = list(self.driver.window_handles)
-        for el in course_elements:
-            title = el.get_attribute("title") or el.text.strip()
-            if course_name in title:
-                logger.info(f"Found target course: {title}")
-                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
-                time.sleep(0.5)
-                self.driver.execute_script("arguments[0].click();", el)
-                time.sleep(3)
 
+        # 1. Primary: Locate on interaction hub
+        primary_url = os.environ.get("XXT_COURSE_URL", "https://mooc1.chaoxing.com/visit/interaction")
+        try:
+            self.driver.get(primary_url)
+            time.sleep(2.5)
+
+            course_selectors = [
+                "span.course-name",
+                "h3.course-name",
+                ".course-name.overHidden2",
+                ".course-name",
+                ".courseName",
+                "[class*='course-name']"
+            ]
+            target_el = None
+            for sel in course_selectors:
+                els = self.driver.find_elements(By.CSS_SELECTOR, sel)
+                for el in els:
+                    title = el.get_attribute("title") or el.text.strip()
+                    if course_name in title:
+                        target_el = el
+                        break
+                if target_el:
+                    break
+
+            if target_el:
+                logger.info(f"Found target course '{course_name}' on primary interaction portal")
+                try:
+                    parent_a = target_el.find_element(By.XPATH, "./ancestor::a[1]")
+                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", parent_a)
+                    time.sleep(0.3)
+                    self.driver.execute_script("arguments[0].click();", parent_a)
+                except Exception:
+                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target_el)
+                    time.sleep(0.3)
+                    self.driver.execute_script("arguments[0].click();", target_el)
+
+                time.sleep(3)
                 new_handles = [h for h in self.driver.window_handles if h not in orig_handles]
                 if new_handles:
                     self.driver.switch_to.window(new_handles[-1])
                 else:
                     self._switch_to_window(course_name)
 
+                # Check and bypass face verification on transition page (stucoursemiddle / faceCollectQrPop)
                 time.sleep(2)
-                # Check if course entry face verification popup appears
-                if self.config.pass_face and self.face_bypass.is_popup_present():
-                    logger.info("Face verification popup present on course entry page; executing bypass...")
+                if self.config.pass_face and self.face_bypass.is_popup_present(check_top=True):
+                    logger.info("Face verification popup present on course transition page; executing bypass...")
                     self.face_bypass.bypass()
                     time.sleep(3)
 
+                # Wait for transition/redirect away from stucoursemiddle
+                for _ in range(6):
+                    if "stucoursemiddle" not in self.driver.current_url:
+                        break
+                    time.sleep(1)
+
+                if len(self.driver.window_handles) > len(orig_handles):
+                    self.driver.switch_to.window(self.driver.window_handles[-1])
+
                 return True
+        except Exception as e:
+            logger.warning(f"Failed to open course via primary portal: {e}")
+
+        # 2. Fallback: Try via i.chaoxing.com
+        try:
+            logger.info("Attempting fallback course selection via i.chaoxing.com...")
+            self.driver.get("https://i.chaoxing.com/")
+            time.sleep(2)
+            self._navigate_to_course_list_tab()
+
+            course_elements = self.driver.find_elements(By.CLASS_NAME, "course-name")
+            if not course_elements:
+                course_elements = self.driver.find_elements(By.CLASS_NAME, "courseName")
+            if not course_elements:
+                course_elements = self.driver.find_elements(By.CSS_SELECTOR, '[class*="w_cour_txtH"]')
+
+            for el in course_elements:
+                title = el.get_attribute("title") or el.text.strip()
+                if course_name in title:
+                    logger.info(f"Found target course on i.chaoxing.com: {title}")
+                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
+                    time.sleep(0.5)
+                    self.driver.execute_script("arguments[0].click();", el)
+                    time.sleep(3)
+
+                    new_handles = [h for h in self.driver.window_handles if h not in orig_handles]
+                    if new_handles:
+                        self.driver.switch_to.window(new_handles[-1])
+                    else:
+                        self._switch_to_window(course_name)
+
+                    time.sleep(2)
+                    if self.config.pass_face and self.face_bypass.is_popup_present(check_top=True):
+                        logger.info("Face verification popup present on course entry page; executing bypass...")
+                        self.face_bypass.bypass()
+                        time.sleep(3)
+
+                    return True
+        except Exception as e:
+            logger.warning(f"Fallback selection error: {e}")
 
         raise CourseNotFoundError(course_name)
 
@@ -177,48 +303,96 @@ class CourseRunner:
         """Inspects and returns the chapter list for a given course."""
         self.select_course(course_name)
         time.sleep(2)
+
+        # 1. Switch to chapter tab if present
         try:
-            navs = self.driver.find_elements(By.CLASS_NAME, "nav_content")
-            if not navs:
-                navs = self.driver.find_elements(By.CSS_SELECTOR, "li[data-nav-name='章节']")
+            navs = self.driver.find_elements(By.CSS_SELECTOR, ".nav_content, li[data-nav-name*='章节'], [title*='章节'], a[title*='章节']")
             for nav in navs:
-                if "章节" in nav.text:
-                    nav.click()
-                    time.sleep(1)
+                t = nav.get_attribute("title") or nav.text.strip()
+                if "章节" in t:
+                    self.driver.execute_script("arguments[0].click();", nav)
+                    time.sleep(2)
                     break
         except Exception:
             pass
 
-        self.driver.switch_to.default_content()
-        frames = self.driver.find_elements(By.TAG_NAME, "iframe")
-        for f in frames:
-            try:
-                src = f.get_attribute("src") or ""
-                if "courselist" in src or "catalog" in src or "work" in src:
-                    self.driver.switch_to.frame(f)
-                    break
-            except Exception:
-                pass
+        # 2. Check for face popup if landed here
+        if self.config.pass_face and self.face_bypass.is_popup_present(check_top=True):
+            self.face_bypass.bypass()
+            time.sleep(2)
 
+        # 3. Locate candidate chapter elements across top document and ALL iframes
         chapters = []
-        nodes = self.driver.find_elements(By.CSS_SELECTOR, ".posCatalog_name, .catalog_name, .level_two")
-        for idx, n in enumerate(nodes):
-            t = n.get_attribute("title") or n.text.strip()
-            if t:
-                try:
-                    parent = n.find_element(By.XPATH, "..")
-                    parent_html = parent.get_attribute("innerHTML") or ""
-                except Exception:
-                    parent_html = ""
-                has_mission = "catalog_tishi" in parent_html or "ans-job-icon" in parent_html
-                completed = "icon_complete" in parent_html or ("catalog_tishi" not in parent_html and "ans-job-icon-clear" not in parent_html)
-                chapters.append({
-                    "index": idx + 1,
-                    "title": t,
-                    "has_mission": has_mission,
-                    "completed": completed
-                })
+        candidate_selectors = [
+            ".posCatalog_name, .catalog_name, .level_two",
+            "[class*='posCatalog_name']",
+            "[class*='catalog_name']",
+            "[class*='level_two']",
+            "[class*='posCatalog']"
+        ]
+
+        def extract_nodes_from_context(ctx) -> List[dict]:
+            parsed = []
+            for sel in candidate_selectors:
+                nodes = ctx.find_elements(By.CSS_SELECTOR, sel)
+                if nodes:
+                    for idx, n in enumerate(nodes):
+                        t = n.get_attribute("title") or n.text.strip()
+                        if t:
+                            try:
+                                parent = n.find_element(By.XPATH, "..")
+                                parent_html = parent.get_attribute("innerHTML") or ""
+                            except Exception:
+                                parent_html = ""
+                            has_mission = "catalog_tishi" in parent_html or "ans-job-icon" in parent_html
+                            completed = "icon_complete" in parent_html or ("catalog_tishi" not in parent_html and "ans-job-icon-clear" not in parent_html)
+                            parsed.append({
+                                "index": idx + 1,
+                                "title": t,
+                                "has_mission": has_mission,
+                                "completed": completed
+                            })
+                    if parsed:
+                        break
+            return parsed
+
+        # First check top-level document
         self.driver.switch_to.default_content()
+        chapters = extract_nodes_from_context(self.driver)
+
+        # If not in top document, inspect all iframes prioritizing frame_content-zj
+        if not chapters:
+            iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
+            def iframe_priority(f):
+                fid = (f.get_attribute("id") or "").lower()
+                fname = (f.get_attribute("name") or "").lower()
+                fsrc = (f.get_attribute("src") or "").lower()
+                if "frame_content-zj" in fid or "frame_content-zj" in fname:
+                    return 0
+                if "studentcourse" in fsrc or "stu" in fsrc:
+                    return 1
+                if "catalog" in fsrc or "courselist" in fsrc:
+                    return 2
+                return 3
+
+            sorted_iframes = sorted(iframes, key=iframe_priority)
+            for f in sorted_iframes:
+                try:
+                    self.driver.switch_to.default_content()
+                    self.driver.switch_to.frame(f)
+                    chapters = extract_nodes_from_context(self.driver)
+                    if chapters:
+                        break
+                except Exception:
+                    continue
+
+        self.driver.switch_to.default_content()
+
+        # 4. If chapters is still empty, dump DOM and screenshot for debugging (Issue #4 recommendation)
+        if not chapters:
+            logger.warning(f"Could not locate chapter nodes for course '{course_name}'; dumping debug DOM snapshot...")
+            self._dump_debug_state(prefix=f"chapter_empty_{course_name}")
+
         return chapters
 
     def find_and_enter_mission_point(self, course_name: str) -> bool:
@@ -245,15 +419,28 @@ class CourseRunner:
         except Exception:
             pass
 
-        # Search for unfinished task indicators (.catalog_tishi120)
+        # Search for unfinished task indicators (.catalog_tishi120 / .catalog_tishi / .ans-job-icon)
         self.driver.switch_to.default_content()
         iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
         target_marker = None
 
-        for iframe in iframes:
+        def iframe_priority(f):
+            fid = (f.get_attribute("id") or "").lower()
+            fname = (f.get_attribute("name") or "").lower()
+            fsrc = (f.get_attribute("src") or "").lower()
+            if "frame_content-zj" in fid or "frame_content-zj" in fname:
+                return 0
+            if "studentcourse" in fsrc or "stu" in fsrc:
+                return 1
+            if "catalog" in fsrc or "courselist" in fsrc:
+                return 2
+            return 3
+
+        for iframe in sorted(iframes, key=iframe_priority):
             try:
+                self.driver.switch_to.default_content()
                 self.driver.switch_to.frame(iframe)
-                markers = self.driver.find_elements(By.CSS_SELECTOR, ".catalog_tishi120")
+                markers = self.driver.find_elements(By.CSS_SELECTOR, ".catalog_tishi120, .catalog_tishi, [class*='catalog_tishi']")
                 if markers:
                     target_marker = markers[0]
                     break

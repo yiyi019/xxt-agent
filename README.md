@@ -104,6 +104,31 @@ python -m xxt_agent.cli solve --question "以下哪部作品是达芬奇的代�
 
 ---
 
+## 🐧 Linux / Docker 容器与无头环境配置
+
+在无桌面显示器的 Linux 服务器或 Docker 容器中运行时，支持通过环境变量进行定制：
+
+| 环境变量 | 作用说明 | 示例 |
+| :--- | :--- | :--- |
+| `XXT_CHROME_BINARY` | 自定义 Chrome/Chromium 二进制程序路径 | `/usr/bin/google-chrome` 或 `/usr/bin/chromium-browser` |
+| `XXT_PROXY` | 设置代理服务器 (亦兼容系统的 `HTTP_PROXY`) | `http://127.0.0.1:7890` |
+| `XXT_COURSE_URL` | 自定义选课入口地址 (默认 `mooc1.chaoxing.com/visit/interaction`) | `https://mooc1.chaoxing.com/visit/interaction` |
+
+内置包含 `--no-sandbox`, `--no-zygote`, `--disable-breakpad`, `--disable-crash-reporter` 等稳定性参数，容器内开箱即用。
+
+---
+
+## 🔒 安全与凭据保管规范
+
+> [!WARNING]
+> `config.json` 包含您的学习通账号密码与 DeepSeek API Key（已内置在 `.gitignore` 中，切勿提交至公共仓库）。
+> 在多用户 Linux 服务器环境下，建议收紧配置文件访问权限：
+> ```bash
+> chmod 600 config.json
+> ```
+
+---
+
 ## 🐍 Python SDK 使用示例
 
 任何 Python 智能体或脚本都可以直接导入并作为类调用：
