@@ -19,7 +19,12 @@ from selenium.webdriver.common.by import By
 from xxt_agent.ai_solver import DeepSeekSolver
 from xxt_agent.config import XXTConfig
 from xxt_agent.content_handlers import AudioHandler, DiscussionHandler, PPTHandler, ReadingHandler
-from xxt_agent.exceptions import CourseNotFoundError, DailyLimitReachedError
+from xxt_agent.exceptions import (
+    CourseNotFoundError,
+    DailyLimitReachedError,
+    VideoNotFoundError,
+    BlockedByFaceVerificationError,
+)
 from xxt_agent.face_bypass import FaceBypass
 from xxt_agent.font_decoder import FontDecoder
 from xxt_agent.models import CourseInfo, CourseRunSummary, RunEvent
@@ -344,8 +349,15 @@ class CourseRunner:
                                 parent_html = parent.get_attribute("innerHTML") or ""
                             except Exception:
                                 parent_html = ""
-                            has_mission = "catalog_tishi" in parent_html or "ans-job-icon" in parent_html
-                            completed = "icon_complete" in parent_html or ("catalog_tishi" not in parent_html and "ans-job-icon-clear" not in parent_html)
+                            has_mission = (
+                                "knowledgeJobCount" in parent_html
+                                or "catalog_tishi" in parent_html
+                                or "ans-job-icon" in parent_html
+                            )
+                            completed = (
+                                "icon_yiwanc" in parent_html
+                                or "icon_complete" in parent_html
+                            )
                             parsed.append({
                                 "index": idx + 1,
                                 "title": t,
@@ -440,19 +452,49 @@ class CourseRunner:
             try:
                 self.driver.switch_to.default_content()
                 self.driver.switch_to.frame(iframe)
-                markers = self.driver.find_elements(By.CSS_SELECTOR, ".catalog_tishi120, .catalog_tishi, [class*='catalog_tishi']")
-                if markers:
-                    target_marker = markers[0]
+
+                # Strategy 1: Iterate .catalog_title blocks, skipping completed ones
+                title_divs = self.driver.find_elements(By.CSS_SELECTOR, ".catalog_title, [class*='catalog_title']")
+                if title_divs:
+                    for td in title_divs:
+                        html = td.get_attribute("outerHTML") or ""
+                        # Skip if completed
+                        if "icon_yiwanc" in html or "icon_complete" in html:
+                            continue
+                        # Skip if no task indicator
+                        if "knowledgeJobCount" not in html and "catalog_tishi" not in html and "ans-job-icon" not in html:
+                            continue
+                        links = td.find_elements(By.CSS_SELECTOR, "a.clicktitle, a")
+                        target_marker = links[0] if links else td
+                        target_title = td.text.strip()[:60]
+                        break
+
+                # Strategy 2: If no target from catalog_title, check catalog markers that do NOT have icon_yiwanc
+                if not target_marker:
+                    markers = self.driver.find_elements(By.CSS_SELECTOR, ".catalog_tishi120, .catalog_tishi, [class*='catalog_tishi']")
+                    for m in markers:
+                        try:
+                            parent = m.find_element(By.XPATH, "..")
+                            p_html = parent.get_attribute("outerHTML") or ""
+                            if "icon_yiwanc" in p_html or "icon_complete" in p_html:
+                                continue
+                            target_marker = m
+                            target_title = parent.text.strip()[:60]
+                            break
+                        except Exception:
+                            continue
+
+                if target_marker:
                     break
             except Exception:
                 self.driver.switch_to.default_content()
                 continue
 
         if not target_marker:
-            logger.info("No unfinished mission points (.catalog_tishi120) found in chapter tree")
+            logger.info("No unfinished mission points found in chapter tree")
             return False
 
-        logger.info("Found unfinished chapter mission point; entering...")
+        logger.info(f"Target unfinished chapter: {target_title}; entering...")
         self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target_marker)
         time.sleep(0.5)
         self.driver.execute_script("arguments[0].click();", target_marker)
@@ -532,6 +574,14 @@ class CourseRunner:
             end_time="",
         )
 
+        before_done = set()
+        try:
+            chapters_before = self.get_chapters(course_name)
+            before_done = {ch["title"] for ch in chapters_before if ch.get("completed")}
+            logger.info(f"Pre-run completed chapters count: {len(before_done)}")
+        except Exception as e:
+            logger.debug(f"Could not snapshot pre-run chapters: {e}")
+
         try:
             self.select_course(course_name)
 
@@ -577,6 +627,44 @@ class CourseRunner:
                 self._fold_sidebar()
                 chapter_title = self._get_current_chapter_title()
                 logger.info(f"--- Processing Chapter {chapters_done + 1}: {chapter_title} ---")
+
+                # Check for blocking server-side face verification overlay
+                FACE_BLOCKERS = [
+                    "Facial information collection", "人脸信息采集",
+                    "扫描二维码", "请使用手机APP", "请使用手机 APP",
+                    "face collection", "faceCollect",
+                    "人脸采集", "请扫描下方二维码进入",
+                ]
+                try:
+                    self.driver.switch_to.default_content()
+                    body_text = self.driver.execute_script(
+                        "return (document.body && document.body.innerText) || '';"
+                    ) or ""
+                    try:
+                        self.driver.switch_to.frame("iframe")
+                        iframe_text = self.driver.execute_script(
+                            "return (document.body && document.body.innerText) || '';"
+                        ) or ""
+                        body_text += " " + iframe_text
+                    except Exception:
+                        pass
+                    self.driver.switch_to.default_content()
+
+                    if any(kw in body_text for kw in FACE_BLOCKERS):
+                        msg = (
+                            f"课程 '{course_name}' 章节 '{chapter_title}' 被强制人脸核验拦截。"
+                            f"需要在学习通 APP 扫码完成人脸采集后才能继续，自动化无法绕过此类服务端强制验证。"
+                        )
+                        logger.error(msg)
+                        summary.errors.append(msg)
+                        summary.success = False
+                        self._emit(RunEvent(
+                            event_type="face_blocked",
+                            data={"course": course_name, "chapter": chapter_title, "message": msg}
+                        ))
+                        break
+                except Exception as e:
+                    logger.debug(f"Face blocker check error: {e}")
 
                 # Iterate through all sub-tabs (e.g. 1 视频, 2 章节测验) in current chapter
                 self.driver.switch_to.default_content()
@@ -644,11 +732,50 @@ class CourseRunner:
             summary.daily_limit_reached = True
             summary.daily_limit_reason = dle.message
             self._emit(RunEvent(event_type="daily_limit_reached", data={"course": course_name, "reason": dle.message}))
+        except VideoNotFoundError as vnf:
+            logger.error(f"Video element not found: {vnf.message}")
+            summary.errors.append(str(vnf.message))
+            summary.success = False
+            self._emit(RunEvent(event_type="video_blocked", data={
+                "course": course_name,
+                "message": vnf.message
+            }))
+        except BlockedByFaceVerificationError as bfe:
+            logger.error(f"Blocked by face verification: {bfe.message}")
+            summary.errors.append(str(bfe.message))
+            summary.success = False
+            self._emit(RunEvent(event_type="face_blocked", data={
+                "course": course_name,
+                "message": bfe.message
+            }))
         except Exception as e:
             logger.error(f"Course run encountered error: {e}", exc_info=True)
             summary.errors.append(str(e))
             summary.success = False
         finally:
+            # Cross-verify newly completed chapters via course catalog
+            try:
+                chapters_after = self.get_chapters(course_name)
+                after_done = {ch["title"] for ch in chapters_after if ch.get("completed")}
+                newly_done = after_done - before_done
+                summary.newly_completed_count = len(newly_done)
+
+                processed_claim = (
+                    summary.videos_completed + summary.quizzes_completed
+                    + summary.ppt_completed + summary.reading_completed + summary.audio_completed
+                )
+
+                if before_done and after_done and not newly_done and processed_claim > 0 and not summary.daily_limit_reached:
+                    summary.success = False
+                    msg = (
+                        f"目录验证失败：内部计数声称完成 {processed_claim} 项，"
+                        f"但目录已完成节点数运行前后均为 {len(after_done)}，实际未新增任何完成章节。"
+                    )
+                    summary.errors.append(msg)
+                    logger.warning(msg)
+            except Exception as e:
+                logger.debug(f"Post-run verification failed: {e}")
+
             summary.end_time = datetime.datetime.now().isoformat()
             self._emit(RunEvent(event_type="course_run_complete", data=summary.to_dict()))
 

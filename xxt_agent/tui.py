@@ -158,9 +158,31 @@ class AgentTUI:
             statuses = edata.get("statuses", {})
             self.add_event("代办圆满", "bold green", f"所有排队课程均已完成或达上限: {statuses}")
 
+        elif etype == "face_blocked":
+            c_name = edata.get("course") or self.course_name
+            chapter = edata.get("chapter", "")
+            self.status_text = f"【{c_name}】被服务端强制人脸核验拦截，需在 APP 扫码"
+            self.add_event("人脸拦截", "bold red", f"【{c_name}】章节 '{chapter}' 被服务端强制人脸核验拦截，需在 APP 扫码后才能继续")
+
+        elif etype == "video_blocked":
+            c_name = edata.get("course") or self.course_name
+            self.status_text = f"【{c_name}】未找到视频元素，可能被遮挡或未加载"
+            self.add_event("视频缺失", "bold red", f"【{c_name}】连续 30 秒未找到视频元素，可能被遮挡或未加载")
+
         elif etype == "course_run_complete":
-            self.status_text = "课程指定目标已圆满完成！"
-            self.add_event("任务圆满", "bold magenta", "所有目标章节均已刷完！")
+            success = edata.get("success", True)
+            newly = edata.get("newly_completed_count", 0)
+            errors = edata.get("errors", [])
+            daily_limit = edata.get("daily_limit_reached", False)
+            if success and not errors:
+                self.status_text = f"课程目标已完成！本次新增 {newly} 个完成点"
+                self.add_event("任务圆满", "bold green", f"所有目标章节均已刷完！（新增完成: {newly}）")
+            elif daily_limit:
+                pass
+            else:
+                err_msg = "; ".join(errors[:2]) if errors else "未实际完成任何任务点"
+                self.status_text = f"课程运行异常：{err_msg[:60]}"
+                self.add_event("运行异常", "bold red", f"课程未能正常完成: {err_msg[:100]}")
 
     def make_header(self) -> Panel:
         title = Text("=== Xuexitong Agent TUI · 学习通智能体终端监控控制台 ===", style="bold white on blue", justify="center")

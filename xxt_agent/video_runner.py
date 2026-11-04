@@ -9,7 +9,7 @@ from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.by import By
 
 from xxt_agent.ai_solver import DeepSeekSolver
-from xxt_agent.exceptions import DailyLimitReachedError
+from xxt_agent.exceptions import DailyLimitReachedError, VideoNotFoundError
 from xxt_agent.face_bypass import FaceBypass
 from xxt_agent.font_decoder import FontDecoder
 from xxt_agent.models import RunEvent
@@ -193,6 +193,7 @@ class VideoRunner:
         # 4. Monitor loop
         last_time_str = ""
         stagnant_seconds = 0
+        video_missing_count = 0
         start_ts = time.time()
 
         while True:
@@ -223,10 +224,32 @@ class VideoRunner:
 
             # Retrieve video duration and current time
             times = self._get_video_times()
-            cur_time = times.get("current_seconds", 0)
-            duration = times.get("duration_seconds", 1)
+            cur_time = float(times.get("current_seconds", 0) or 0)
+            duration = float(times.get("duration_seconds", 0) or 0)
             cur_time_str = times.get("current_text", "")
             duration_str = times.get("duration_text", "")
+
+            # Guard: if video element is absent or duration is 0, do NOT declare completion
+            if duration <= 0:
+                video_missing_count += 1
+                if video_missing_count >= 30:
+                    logger.error(
+                        f"Video {index}/{total}: element not found for {video_missing_count}s. "
+                        f"Page may be blocked by face verification or video not loaded."
+                    )
+                    self._emit("video_not_found", {
+                        "index": index,
+                        "course": course_name,
+                        "message": "连续30秒未找到视频元素，可能被弹窗遮挡或视频未加载",
+                    })
+                    raise VideoNotFoundError(
+                        f"视频 {index}/{total} 未找到视频元素（连续 {video_missing_count} 秒），"
+                        f"可能被人脸核验弹窗遮挡或 iframe 定位错误"
+                    )
+                logger.debug(f"Video element not found (attempt {video_missing_count}/30), retrying...")
+                continue
+            else:
+                video_missing_count = 0
 
             # Check completion via parent job icon
             if self._is_job_finished(video_idx):

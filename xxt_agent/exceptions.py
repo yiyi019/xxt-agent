@@ -55,3 +55,15 @@ class DailyLimitReachedError(XXTAgentError):
         self.course_name = course_name
         self.limit_type = limit_type
 
+
+class VideoNotFoundError(XXTAgentError):
+    """Raised when video element cannot be found (possibly blocked by face verification or frame issues)."""
+    def __init__(self, message: str = "Video element not found", details: dict = None):
+        super().__init__(message, error_code="VIDEO_NOT_FOUND", details=details)
+
+
+class BlockedByFaceVerificationError(XXTAgentError):
+    """Raised when page is blocked by server-side face verification that cannot be bypassed automatically."""
+    def __init__(self, message: str = "Page blocked by server-side face verification", details: dict = None):
+        super().__init__(message, error_code="FACE_BLOCKED_SERVER_SIDE", details=details)
+
