@@ -19,14 +19,14 @@ logger = logging.getLogger(__name__)
 class DeepSeekSolver:
     """Solves Xuexitong quiz questions using the DeepSeek API."""
 
-    FALLBACK_MODELS = ["deepseek-v4.1-flash", "deepseek-flash", "deepseek-chat"]
+    FALLBACK_MODELS = ["deepseek-flash", "deepseek-v4-pro"]
 
     def __init__(
         self,
         api_key: str,
-        primary_model: str = "deepseek-v4.1-flash",
+        primary_model: str = "deepseek-flash",
         base_url: str = "https://api.deepseek.com",
-        timeout: int = 45,
+        timeout: int = 90,
     ):
         self.api_key = api_key.strip()
         self.primary_model = primary_model.strip()

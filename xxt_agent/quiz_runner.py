@@ -15,6 +15,25 @@ from xxt_agent.models import QuizAnswerResult, QuizQuestion, RunEvent
 logger = logging.getLogger(__name__)
 
 
+
+def _normalize_qtype(raw: str) -> str:
+    """把 AI 返回的英文题型（Single Choice / Multiple Choice / True or False…）
+    统一成中文，供后续分支判断使用。"""
+    t = (raw or "").strip().lower()
+    if not t:
+        return "单选题"
+    if ("multiple" in t) or ("多选" in raw) or ("checkbox" in t):
+        return "多选题"
+    if ("true" in t) or ("false" in t) or ("判断" in raw) or ("boolean" in t):
+        return "判断题"
+    if ("blank" in t) or ("填空" in raw):
+        return "填空题"
+    if ("short" in t) or ("essay" in t) or ("简答" in raw) or ("论述" in raw) or ("名词" in raw):
+        return "简答题"
+    if ("single" in t) or ("单选" in raw) or ("choice" in t):
+        return "单选题"
+    return raw
+
 class QuizRunner:
     """Automates chapter test and homework questions using FontTools decryption and DeepSeek AI."""
 
@@ -138,6 +157,20 @@ class QuizRunner:
 
             # Extract options
             opts_elements = q_elem.find_elements(By.TAG_NAME, "li")
+            if not opts_elements:
+                # 诊断：新版测验若不用 <li>，把真实结构打出来
+                try:
+                    html = q_elem.get_attribute("outerHTML") or ""
+                    kids = self.driver.execute_script(
+                        "var q=arguments[0],o=[];"
+                        "q.querySelectorAll('*').forEach(function(e){"
+                        " if(o.length<12 && typeof e.className==='string' && e.className)"
+                        "   o.push(e.tagName+'.'+e.className.slice(0,36));});"
+                        "return o;", q_elem)
+                    logger.warning(f"Q#{q_idx+1} 没有 <li> 选项；子元素: {kids}")
+                    logger.warning(f"Q#{q_idx+1} HTML: {html[:400]}")
+                except Exception as _e:
+                    logger.debug(f"option diag failed: {_e}")
             option_elements_map[q_idx] = opts_elements
 
             decoded_options = []
@@ -165,7 +198,7 @@ class QuizRunner:
         for res in results:
             q_idx = res.question_index
             q_elem = question_elements[q_idx]
-            q_type = res.question_type
+            q_type = _normalize_qtype(res.question_type)
             answers = res.answers
             matched_idxs = res.matched_option_indices
             opt_elements = option_elements_map.get(q_idx, [])
@@ -232,11 +265,14 @@ class QuizRunner:
         if rate >= self.submit_threshold:
             logger.info("Answer rate meets threshold; submitting quiz...")
             self._submit_quiz()
-        else:
-            logger.info("Answer rate below threshold; saving draft...")
-            self._save_draft()
+            return True
 
-        return True
+        # 未达阈值：只存草稿，**不能**算作已完成，
+        # 否则 run_course 会误判章节已完成（这是此前“假成功”的源头）。
+        logger.info(f"Answer rate {rate:.1%} below threshold {self.submit_threshold:.1%}; "
+                    f"saving draft (NOT counted as completed)")
+        self._save_draft()
+        return False
 
     def _submit_quiz(self) -> None:
         try:

@@ -34,6 +34,17 @@ class FaceBypass:
         "(@Kalimdor)_6e98c17c08204755905e1537b1933e72"
     )
 
+    # 新版「准入级人脸采集」页面没有任何 face* class，只能靠正文文案识别
+    FACE_TEXT_MARKERS = (
+        "Facial information collection",
+        "collect facial information",
+        "人脸信息采集",
+        "人脸采集",
+        "请使用手机APP",
+        "请使用手机 APP",
+        "请扫描下方二维码",
+    )
+
     POPUP_SELECTORS = [
         ".chapterVideoFaceMaskDiv",
         ".maskDiv",
@@ -75,6 +86,19 @@ class FaceBypass:
         try:
             el = self.driver.find_element("id", "fcqrimg")
             if el and el.is_displayed():
+                return True
+        except Exception:
+            pass
+
+        # 兜底：按正文文本判断。
+        # 新版的「准入级人脸采集」页面不带任何 face* class，只有一段文案，
+        # 上面的选择器全部匹配不到，会导致 bypass() 永远不被触发。
+        try:
+            self.driver.switch_to.default_content()
+            body = self.driver.execute_script(
+                "return (document.body && document.body.innerText) || ''"
+            ) or ""
+            if any(k in body for k in self.FACE_TEXT_MARKERS):
                 return True
         except Exception:
             pass
@@ -364,7 +388,32 @@ class FaceBypass:
                     return True
 
             logger.info("API verification did not succeed; applying DOM mask removal fallback")
-            return self.force_remove_popup()
+            # 先判断这是「准入级拦截页」还是「播放中的人脸校验弹窗」：
+            #  - 准入页：整页无内容，必须刷新才会下发
+            #  - 播放中弹窗：刷新会把播放进度打回原点，绝不能刷新
+            admission = False
+            try:
+                self.driver.switch_to.default_content()
+                body = self.driver.execute_script(
+                    "return (document.body && document.body.innerText) || ''"
+                ) or ""
+                admission = any(k in body for k in self.FACE_TEXT_MARKERS)
+            except Exception:
+                pass
+
+            removed = self.force_remove_popup()
+            if removed and admission:
+                # 仅准入页需要刷新
+                try:
+                    time.sleep(1)
+                    self.driver.refresh()
+                    time.sleep(6)
+                    logger.info("Reloaded chapter page after removing admission-gate overlay")
+                except Exception as e:
+                    logger.debug(f"Reload after overlay removal failed: {e}")
+            elif removed:
+                logger.info("Overlay removed during playback; keeping page state (no reload)")
+            return removed
         except Exception as e:
             logger.warning(f"Face bypass failed: {e}; attempting DOM removal")
             return self.force_remove_popup()
