@@ -232,7 +232,15 @@ class VideoRunner:
             # Guard: if video element is absent or duration is 0, do NOT declare completion
             if duration <= 0:
                 video_missing_count += 1
-                if video_missing_count >= 30:
+                # 每 3 秒尝试重定位播放器并恢复播放：
+                # 人脸弹窗被移除后，iframe 上下文常常会失效，导致读不到 <video>。
+                if video_missing_count % 3 == 1:
+                    self._switch_to_video_frame(video_idx)
+                    self._trigger_play()
+                if video_missing_count % 5 == 0:
+                    logger.info(f"Video element missing for {video_missing_count}s; "
+                                f"attempting re-locate and resume")
+                if video_missing_count >= 90:
                     logger.error(
                         f"Video {index}/{total}: element not found for {video_missing_count}s. "
                         f"Page may be blocked by face verification or video not loaded."
@@ -246,7 +254,7 @@ class VideoRunner:
                         f"视频 {index}/{total} 未找到视频元素（连续 {video_missing_count} 秒），"
                         f"可能被人脸核验弹窗遮挡或 iframe 定位错误"
                     )
-                logger.debug(f"Video element not found (attempt {video_missing_count}/30), retrying...")
+                logger.debug(f"Video element not found (attempt {video_missing_count}/90), retrying...")
                 continue
             else:
                 video_missing_count = 0
@@ -312,9 +320,16 @@ class VideoRunner:
                 }
                 // 3. Raw HTML5 video element play
                 var v = document.querySelector('video');
-                if (v && v.paused) {
-                    v.muted = true;
-                    try { v.play(); } catch(e){}
+                if (v) {
+                    // 关键：某些页面下播放器初始化后不加载元数据（readyState 0 / duration NaN），
+                    // 必须显式 load()，否则脚本永远读不到时长，被误判为“播放完成”。
+                    if (v.readyState === 0 || !v.duration || isNaN(v.duration)) {
+                        try { v.load(); } catch(e){}
+                    }
+                    if (v.paused) {
+                        v.muted = true;
+                        try { v.play(); } catch(e){}
+                    }
                 }
                 """
             )

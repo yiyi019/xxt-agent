@@ -721,6 +721,21 @@ class CourseRunner:
                 # 4. Advance to next page
                 self.driver.switch_to.default_content()
                 has_next = self._click_next_page()
+
+                # 兜底：按钮点不动时，直接从目录里跳转到下一个未完成章节。
+                # （学习通改版后「下一节」的 XPath 经常失效，不能就此判定课程结束）
+                if not has_next:
+                    logger.info("Next-page button failed; jumping to next unfinished chapter via catalog")
+                    try:
+                        has_next = self.find_and_enter_mission_point(course_name)
+                        if has_next:
+                            self._switch_to_window("学生学习页面")
+                            self._fold_sidebar()
+                            time.sleep(2)
+                    except Exception as e:
+                        logger.warning(f"Catalog fallback navigation failed: {e}")
+                        has_next = False
+
                 if not has_next:
                     logger.info("Finished all chapters in this course!")
                     break
