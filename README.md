@@ -31,7 +31,7 @@
 | :--- | :--- |
 | **纯净轻量 (Lightweight)** | 零 GUI 依赖，支持静默无头运行（Headless），后台内存占用减少 70%+。 |
 | **Agent 原生友好 (Agent-Native)** | 提供 `--json` 严格输出模式与标准退出状态码（0, 1, 2...），便于大模型 100% 精准解析。 |
-| **多模型 AI 解题 (DeepSeek)** | 内置 `deepseek-v4.1-flash` 大模型支持（带多模型自动回退），针对单选、多选、判断、填空定制 Prompt。 |
+| **多模型 AI 解题 (DeepSeek)** | 内置 `deepseek-flash` 大模型支持（带多模型自动回退），针对单选、多选、判断、填空定制 Prompt。 |
 | **反混淆字体解密 (FontTools)** | 动态解析超星加密混淆字体，在内存中完成字形 MD5 还原，彻底避免题目乱码。 |
 | **全方位风控规避 (Stealth)** | 自动拦截前端人脸识别弹窗（支持 API 签名 + 图像微扰动绕过），注入防失焦（Anti-Blur）脚本防止切屏暂停。⚠️ 注：若遇超星服务端强制活体采集（全页遮罩且服务端不下发视频内容），需先在手机 APP 扫码完成人脸采集后再继续。 |
 | **标准函数调用 Schema** | 自带 `agent_tools.json`，方便各类 Agent 平台直接注册为原生 Tool。 |
@@ -55,7 +55,7 @@ python -m xxt_agent.cli status --json
   "driver_exists": true,
   "cookies_exist": true,
   "api_key_configured": true,
-  "deepseek_model": "deepseek-v4.1-flash",
+  "deepseek_model": "deepseek-flash",
   "headless_mode": true,
   "default_speed": 2.0
 }
@@ -121,11 +121,10 @@ python -m xxt_agent.cli solve --question "以下哪部作品是达芬奇的代�
 ## 🔒 安全与凭据保管规范
 
 > [!WARNING]
-> `config.json` 包含您的学习通账号密码与 DeepSeek API Key（已内置在 `.gitignore` 中，切勿提交至公共仓库）。
-> 在多用户 Linux 服务器环境下，建议收紧配置文件访问权限：
-> ```bash
-> chmod 600 config.json
-> ```
+> 配置文件 `config.json` 包含您的学习通账号密码与 DeepSeek API Key，默认保存在用户目录 `~/.config/xxt-agent/`（不在代码仓库内，也不会被打包）。
+> 保存时程序会自动将其权限收紧为 `600`。可通过环境变量 `XXT_AGENT_HOME` 指定其他目录。
+>
+> **从旧版本升级**：若首次运行时新位置没有配置，程序会自动把旧位置（包目录或仓库根目录下的 `config.json`，以及 `data/cookies.pkl`）复制到新位置，旧文件不会被删除，确认无误后可自行删除。
 
 ---
 
@@ -134,29 +133,24 @@ python -m xxt_agent.cli solve --question "以下哪部作品是达芬奇的代�
 任何 Python 智能体或脚本都可以直接导入并作为类调用：
 
 ```python
-from xxt_agent import XuexitongAgent
+from xxt_agent import XXTAgent
 
-# 使用上下文管理器自动管理浏览器资源
-with XuexitongAgent() as agent:
+# 使用上下文管理器自动管理浏览器资源（配置读取自 ~/.config/xxt-agent/config.json）
+with XXTAgent() as agent:
     # 1. 查看已选课程
     courses = agent.list_courses()
-    print("课程列表:", courses)
+    print("课程列表:", [c.name for c in courses])
 
-    # 2. 自动刷课 30 分钟 (1800 秒)，2 倍速
-    result = agent.run_course(
-        course_name="艺术鉴赏",
-        duration_seconds=1800,
-        speed=2.0,
-        max_chapters=5
-    )
-    print("刷课结果:", result)
+    # 2. 自动刷课，最多处理 5 个章节
+    summary = agent.run_course("艺术鉴赏", max_chapters=5)
+    print("刷课结果:", summary.to_dict())
 
     # 3. 单独搜题
-    ans = agent.solve(
-        question="艺术鉴赏的核心要素包括什么？",
-        q_type="简答题"
+    answers = agent.solve_question(
+        "艺术鉴赏的核心要素包括什么？",
+        question_type="简答题",
     )
-    print("AI 答案:", ans)
+    print("AI 答案:", answers)
 ```
 
 ---

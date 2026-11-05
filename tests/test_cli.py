@@ -16,7 +16,9 @@ class TestCLI(unittest.TestCase):
             self.assertIn("api_model", parsed)
             self.assertIn("browser", parsed)
 
-    def test_cli_solve(self):
+    @patch("xxt_agent.ai_solver.DeepSeekSolver._call_api", return_value="A")
+    def test_cli_solve(self, _mock_api):
+        # The DeepSeek call is mocked: no network access or API key is required.
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             exit_code = main([
                 "--format", "json",

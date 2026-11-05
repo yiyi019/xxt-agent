@@ -12,7 +12,7 @@ class TestXXTConfig(unittest.TestCase):
         cfg = XXTConfig()
         self.assertEqual(cfg.browser, "edge")
         self.assertTrue(cfg.headless)
-        self.assertEqual(cfg.api_model, "deepseek-v4.1-flash")
+        self.assertEqual(cfg.api_model, "deepseek-flash")
         self.assertTrue(cfg.pass_face)
         self.assertFalse(cfg.pass_video)
 
