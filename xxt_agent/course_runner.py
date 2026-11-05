@@ -17,7 +17,7 @@ from selenium.common.exceptions import (
 from selenium.webdriver.common.by import By
 
 from xxt_agent.ai_solver import DeepSeekSolver
-from xxt_agent.config import XXTConfig
+from xxt_agent.config import DATA_DIR, XXTConfig
 from xxt_agent.content_handlers import AudioHandler, DiscussionHandler, PPTHandler, ReadingHandler
 from xxt_agent.exceptions import (
     CourseNotFoundError,
@@ -92,9 +92,9 @@ class CourseRunner:
             logger.debug(f"Event emission error: {e}")
 
     def _dump_debug_state(self, prefix: str = "debug") -> None:
-        """Helper to dump current page HTML and screenshot to data/debug/ for troubleshooting."""
+        """Helper to dump current page HTML and screenshot to <config dir>/data/debug/ for troubleshooting."""
         try:
-            debug_dir = Path(__file__).resolve().parent / "data" / "debug"
+            debug_dir = DATA_DIR / "debug"
             debug_dir.mkdir(parents=True, exist_ok=True)
             ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             html_path = debug_dir / f"{prefix}_{ts}.html"

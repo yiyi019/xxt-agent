@@ -19,9 +19,9 @@ from rich.text import Text
 from rich.live import Live
 
 from xxt_agent.models import RunEvent
-from xxt_agent.config import XXTConfig
+from xxt_agent.config import XXTConfig, STATUS_FILE_PATH
 
-STATUS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "live_status.json")
+STATUS_FILE = str(STATUS_FILE_PATH)
 
 class AgentTUI:
     def __init__(self, course_name: str, config: XXTConfig):
@@ -64,6 +64,7 @@ class AgentTUI:
             "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         try:
+            os.makedirs(os.path.dirname(STATUS_FILE), exist_ok=True)
             with open(STATUS_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception:

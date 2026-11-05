@@ -24,11 +24,11 @@ if sys.stderr and hasattr(sys.stderr, "reconfigure"):
     except Exception:
         pass
 
-from xxt_agent.config import XXTConfig
+from xxt_agent.config import XXTConfig, STATUS_FILE_PATH
 from xxt_agent.ai_solver import DeepSeekSolver
 from xxt_agent.wizard import run_interactive_wizard, check_and_prompt_if_unconfigured
 
-STATUS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "live_status.json")
+STATUS_FILE = str(STATUS_FILE_PATH)
 
 def _sanitize_data(data: Any) -> Any:
     if isinstance(data, str):
@@ -402,7 +402,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
 
         elif args.command == "tools":
-            from xxt_agent.core.tool_schema import get_agent_tools_schema
+            from xxt_agent.tool_schema import get_agent_tools_schema
             schemas = get_agent_tools_schema()
             output_result(schemas, True)
             return 0

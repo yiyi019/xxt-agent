@@ -7,6 +7,7 @@ name = "xxt-agent"
 version = "1.0.0"
 description = "Lightweight, headless, and agent-optimized Xuexitong course automation system."
 readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.8"
 dependencies = [
     "selenium>=4.15.0",
@@ -23,3 +24,6 @@ xxt-agent = "xxt_agent.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["xxt_agent*"]
+
+[tool.setuptools.package-data]
+xxt_agent = ["data/font_dict.txt", "extensions/*.crx", "config.example.json", "agent_tools.json"]

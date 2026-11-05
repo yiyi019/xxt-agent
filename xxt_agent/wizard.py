@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from xxt_agent.config import XXTConfig
+from xxt_agent.config import DEFAULT_CONFIG_PATH, XXTConfig
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +149,7 @@ def run_interactive_wizard(config: Optional[XXTConfig] = None) -> XXTConfig:
     print(f"  • 课程排队代办: {' -> '.join(config.default_courses)}")
     print(f"  • 运行模式: {mode_name}")
     print("=" * 64)
-    print("配置文件已持久化至: xxt_agent/config.json")
+    print(f"配置文件已持久化至: {DEFAULT_CONFIG_PATH}")
     print("后续可随时通过桌面的快捷方式启动，或使用命令:")
     print("  python -m xxt_agent.cli run")
     print("=" * 64 + "\n")
